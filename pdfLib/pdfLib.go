@@ -58,10 +58,11 @@ type pagesObj struct {
 }
 
 type pageObj struct {
-	fontObj int
+	pageNum int
 	mediabox [4]int
-	content int
-	parent int
+	contentId int
+	parentId int
+//	fontObj int
 }
 
 type fontObj struct {
@@ -127,48 +128,40 @@ func (pdf *InfoPdf) parseTrailCont(linStr string)(err error) {
 
 func (pdf *InfoPdf) getKVStr(instr string)(outstr string, err error) {
 
-	istate :=0
-	stPos := 0
+	stPos := -1
 	endPos := 0
 
 	for i:=0; i< len(instr); i++ {
-		switch istate {
-		case 0:
-			if instr[i] == '<' {
-				if instr[i+1] == '<' {
-					istate = 1
-					stPos = i+2
-					i++
-				} else {
-					return "", fmt.Errorf("only found a single open bracket!")
-				}
+		if instr[i] == '<' {
+			if instr[i+1] == '<' {
+				stPos = i+2
+				break
 			}
-		case 1:
-			if instr[i] == '>' {
-				if instr[i+1] == '>' {
-					istate = 2
-					endPos = i-1
-				} else {
-					return "", fmt.Errorf("only found a single closing bracket!")
-				}
-			}
-		case 2:
-			break
-		default:
 		}
-
 	}
 
-	if stPos == 0 {return "", fmt.Errorf("no opening brackets!")}
+	if stPos == -1 {return "", fmt.Errorf("no open double bracket!")}
+
+	for i:=len(instr)-1; i> stPos; i-- {
+		if instr[i] == '>' {
+			if instr[i-1] == '>' {
+				endPos = i-2
+				break
+			}
+		}
+	}
 
 	if endPos == 0 {return "", fmt.Errorf("no closing brackets!")}
 
-	outstr = instr[stPos: endPos]
+	outstr = instr[stPos: endPos] + "\n"
 	return outstr, nil
 }
 
 func (pdf *InfoPdf) getKvMap(instr string)(kvMap map[string]string , err error) {
 
+fmt.Printf("******* getKvMap\n")
+fmt.Println(instr)
+fmt.Printf("******* getKvMap\n")
 	ist := 0
 	icount := 0
 	linStr := ""
@@ -180,12 +173,12 @@ func (pdf *InfoPdf) getKvMap(instr string)(kvMap map[string]string , err error) 
 			linStr = instr[ist:i]
 			ist = i+1
 			icount++
-//fmt.Printf("linStr %d: %s\n", icount, linStr)
+fmt.Printf("linStr %d: %s\n", icount, linStr)
 			_, err = fmt.Sscanf(linStr, "/%s %s", &key, &val)
 			if err != nil {return kvMap, fmt.Errorf("parse error in line %d %s %v", icount, linStr, err)}
 			// 2 : first letter is / second is ws
 			val = linStr[(len(key)+2):]
-//fmt.Printf("key: %s val: %s\n", key, val)
+fmt.Printf("key: %s val: %s\n", key, val)
 			kvMap[key] = val
 		}
 	}
@@ -197,34 +190,28 @@ func (pdf *InfoPdf) getKvMap(instr string)(kvMap map[string]string , err error) 
 
 func (pdf *InfoPdf) getStream(instr string)(outstr string, err error) {
 
-	istate :=0
-	stPos := 0
+	stPos := -1
 	endPos := 0
 
 	for i:=0; i< len(instr); i++ {
-		switch istate {
-		case 0:
-			if instr[i] == 's' {
-				if string(instr[i:i+6]) == "stream" {
-					stPos = i +6
-					istate = 1
-					i = i+6
-				}
+		if instr[i] == 's' {
+			if string(instr[i:i+6]) == "stream" {
+				stPos = i +6
+				break
 			}
-		case 1:
-			if instr[i] == 'e' {
-				if string(instr[i:i+9]) == "endstream" {
-					endPos = i -1
-					istate = 2
-				}
-			}
-		case 2:
-			break
-		default:
 		}
 	}
 
-	if stPos == 0 {return "", fmt.Errorf("no \"stream\" keyword found!")}
+	if stPos == -1 {return "", fmt.Errorf("no \"stream\" keyword found!")}
+
+	for i:=len(instr)-9; i> stPos; i-- {
+		if instr[i] == 'e' {
+			if string(instr[i:i+9]) == "endstream" {
+				endPos = i -1
+				break
+			}
+		}
+	}
 
 	if endPos == 0 {return "", fmt.Errorf("no \"endstream\" keyword found!")}
 
@@ -254,7 +241,7 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 	_, err = fmt.Sscanf(str,"%d %d %s", &pagesId, &val, &endStr)
 	if err != nil {return kvmap, fmt.Errorf("parseRoot: cannot parse value %s of \"Pages\": %v", str, err)}
 
-	if (pagesId < 1) || (pagesId> pdf.numObj) {return kvmap, fmt.Errorf("parseRoot: Pages object id ouside range: %d", pagesId)}
+	if (pagesId < 1) || (pagesId> pdf.numObj) {return kvmap, fmt.Errorf("parseRoot: Pages object id outside range: %d", pagesId)}
 	pdf.pagesId = pagesId
 
 	return kvmap, nil
@@ -262,26 +249,149 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 
 func (pdf *InfoPdf) parsePages(instr string)(pages *pagesObj, err error) {
 
-fmt.Printf("\n*****\nparsePages:\n%s\n***\n", instr)
+//fmt.Printf("\n*****\nparsePages:\n%s\n***\n", instr)
 
-//	str, err := pdf.getKVStr(instr)
-//	if err != nil {return nil, fmt.Errorf("getkv error %v", err)}
-//	str += "\n"
 	kvm, err := pdf.getKvMap(instr)
 	if err != nil {return nil, fmt.Errorf("getVkMap error %v", err)}
 
 	for key, val := range kvm {
 		fmt.Printf("key: %s value: %s\n", key, val)
 	}
+
+	//Type
+	val, ok := kvm["Type"]
+	if !ok {return nil, fmt.Errorf("Pages: found no Type prop")}
+	if val != "/Pages" {return nil, fmt.Errorf("Pages: Type prop is not Pages")}
+
 	pages = new(pagesObj)
+	// Count
+	val, ok = kvm["Count"]
+	if !ok {return nil, fmt.Errorf("Pages: found no Count prop")}
+	count := 0
+	_, err = fmt.Sscanf(val, "%d", &count)
+	if err != nil {return nil, fmt.Errorf("Pages: cannot convert Count value!")}
+	pdf.pageCount = count
+
+	//kids
+	val, ok = kvm["Kids"]
+	if !ok {return nil, fmt.Errorf("Pages: found no Kids prop!")}
+
+	pages.kids = make([]int, count)
+	istate :=0
+	stPos :=-1
+	endPos :=-1
+	pgCount :=0
+	pgSt :=0
+	pgId :=0
+	pgRev :=0
+	for i:=0; i< len(val); i++ {
+		switch istate {
+		case 0:
+			if val[i] == '[' {
+				stPos = i
+				istate =1
+				pgSt = i+1
+			}
+		case 1:
+			if val[i] == 'R' {
+				pgStr := string(val[pgSt:(i+1)])
+
+				_, errPg := fmt.Sscanf(pgStr,"%d %d R",&pgId, &pgRev)
+				if errPg != nil {return nil, fmt.Errorf("Pages: page %d str %s cannot be parsed: %v", pgCount, pgStr, errPg)}
+
+				pages.kids[pgCount] = pgId
+				pgSt = i+1
+				pgCount++
+				if (pgCount == count) {istate = 2}
+			}
+
+		case 2:
+			if val[i] == ']' {
+				endPos = i
+				istate =3
+			}
+		case 3:
+			break
+		default:
+		}
+	} //i
+
+	if stPos == -1 {return nil, fmt.Errorf("Pages: Kids val has no open bracket '['!")}
+	if endPos == -1 {return nil, fmt.Errorf("Pages: Kids val has no closing bracket ']'!")}
+
 	return pages, nil
 }
 
-func (pdf *InfoPdf) parsePage(instr string)(page *pageObj, err error) {
+func (pdf *InfoPdf) parsePage(instr string, pgNum int)(page *pageObj, err error) {
+
+//fmt.Println("***** instr parsePage")
+//fmt.Println(instr)
+//fmt.Println("***** end instr")
+
+	objStr, err := pdf.getKVStr(instr)
+	if err != nil {return nil, fmt.Errorf("getVkStr error: %v", err)}
+
+//fmt.Println("***** objStr parsePage")
+//fmt.Println(objStr)
+//fmt.Println("***** end objstr")
+
+	kvm, err := pdf.getKvMap(objStr)
+	if err != nil {return nil, fmt.Errorf("getVkMap error: %v", err)}
+
+	for key, val := range kvm {
+		fmt.Printf("key: %s value: %s\n", key, val)
+	}
+
+	page = new(pageObj)
+
+	page.pageNum = pgNum
+
+	objId := 0
+	rev :=0
+
+	//Type
+	val, ok := kvm["Type"]
+	if !ok {return nil, fmt.Errorf("Page: found no Type prop")}
+	if val != "/Page" {return nil, fmt.Errorf("Page: Type prop is not Page")}
+
+	//MediaBox
+	val, ok = kvm["MediaBox"]
+	if !ok {return nil, fmt.Errorf("Page: found no MediaBox prop")}
+
+	//Contents
+	val, ok = kvm["Contents"]
+	if !ok {return nil, fmt.Errorf("Page: found no Contents prop")}
+	_, errScan := fmt.Sscanf(val,"%d %d R", &objId, &rev)
+	if errScan != nil {return nil, fmt.Errorf("Page: error parsing Contents: %v", errScan)}
+	page.contentId = objId
+
+	//Parent
+	val, ok = kvm["Parent"]
+	if !ok {return nil, fmt.Errorf("Page: found no Parent prop")}
+
+	//Resources
+	val, ok = kvm["Resources"]
+	if !ok {return nil, fmt.Errorf("Pages: found no Resources prop")}
+
 
 	return page, nil
 }
 
+func (pdf *InfoPdf) parseContent(instr string, pgNum int)(err error) {
+
+	objStr, err := pdf.getKVStr(instr)
+	if err != nil {return fmt.Errorf("getVkStr error: %v", err)}
+
+fmt.Println("***** objStr parsePage")
+fmt.Println(objStr)
+fmt.Println("***** end objstr")
+	streamStr, err := pdf.getStream(instr)
+
+fmt.Println(streamStr)
+fmt.Println("***** end streamstr")
+
+	return nil
+}
 
 func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
@@ -528,7 +638,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	for i:=trailEnd; i> 0; i-- {
 		if buf[i] == '<' {
 			if buf[i-1] == '<' {
-				trailStart = i 
+				trailStart = i
 				break
 			}
 		}
@@ -660,6 +770,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	objSt := 0
 	val2 := 0
 	xrefErr := true
+	totObj :=0
 
 	for i:= ist; i < trailer_start; i++ {
 		if buf[i] == '\n' {
@@ -680,6 +791,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 				txtFil.WriteString(outstr)
 				return fmt.Errorf("error parsing object heading %s: %v!", linStr, err)
 			}
+			totObj += objIdNum
 			objStr += linStr + fmt.Sprintf("       // obj id %3d: number: %5d\n", objId, objIdNum)
 			istate = 1
 		case 1:
@@ -710,11 +822,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 		default:
 		}
 
-//fmt.Printf("line %d: %s\n", linCount, linStr)
-//fmt.Printf("val1: %d val2: %d end: %s\n", val1, val2, endStr)
 	} // i
-
-
 
 	if xrefErr {
 		outstr = xrefStr
@@ -723,6 +831,8 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 		txtFil.WriteString(outstr)
 		return fmt.Errorf("no valid string (no lf) after xref!")
 	}
+
+	pdf.numObj = totObj
 
 	outstr = xrefStr
 	outstr += objStr
@@ -839,7 +949,7 @@ fmt.Printf("************ root **************\n%s", rootStr)
 		outstr += fmt.Sprintf("   %s: %s\n", key, val)
 	}
 
-	outstr += fmt.Sprintf("//Obj Root with id %d parsed successfully\n", id)
+	outstr += fmt.Sprintf("//Obj Root with id %d parsed successfully\n", pdf.rootId)
 	txtFil.WriteString(outstr)
 
 fmt.Printf("Obj ROOT with Obj id %d parsed successfully\n", id)
@@ -861,38 +971,44 @@ fmt.Printf("pages:\n%s", pagesStr)
 
 	// need to name each Page
 	// Page
-	txtFil.WriteString("************ Page 1 **************\n")
-	id = 1
-	pageStr := string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
-	txtFil.WriteString(pageStr)
+
+	for pg:=1; pg<(pdf.pageCount +1); pg++ {
+
+		outstr = fmt.Sprintf("************ Page %d **************\n", pg)
+		txtFil.WriteString(outstr)
+
+		pageStr := string(buf[(pdfObjList[pg].contSt):(pdfObjList[pg].contEnd)]) + "\n"
+		txtFil.WriteString(pageStr)
 fmt.Printf("page 1:\n%s", pageStr)
 
-
-	pagObj, err := pdf.parsePage(pageStr)
-	if err != nil {
-		outstr = fmt.Sprintf("// error parsing Page: %v\n", err)
+		pagObj, err := pdf.parsePage(pageStr, pg)
+		if err != nil {
+			outstr = fmt.Sprintf("// error parsing Page %d: %v\n",pg ,err)
+			txtFil.WriteString(outstr)
+			return fmt.Errorf("error parsing Page: %v", err)
+		}
+		outstr = fmt.Sprintf("// Page %d parsed successfully\n%v\n",pg ,pagObj)
 		txtFil.WriteString(outstr)
-		return fmt.Errorf("error parsing Page: %v", err)
+
+
+		// need to parse each Page
+		outstr = fmt.Sprintf("************ Content Page %d **************\n", pg)
+		txtFil.WriteString(outstr)
+
+//		id = 4
+		id = pagObj.contentId -1
+fmt.Printf("page %d: contentId: %d\n", pg, id)
+		contentStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
+
+		// seperate stream and kv pairs
+		err = pdf.parseContent(contentStr, pg)
+		if err != nil {
+			outstr = fmt.Sprintf("// error parsing Content %d for Page %d: %v\n",id, pg ,err)
+			txtFil.WriteString(outstr)
+			return fmt.Errorf("error parsing Content %d for Page %d: %v", id, pg, err)
+		}
+
 	}
-	outstr = fmt.Sprintf("// Page parsed successfully\n%v\n", pagObj)
-	txtFil.WriteString(outstr)
-
-
-	// need to parse each Page
-	txtFil.WriteString("************ Content Page 1 **************\n")
-	id = 4
-	contentStr := string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
-
-	// seperate stream and kv pairs
-	kvmap, err = pdf.getKvMap(contentStr)
-
-	kvstr := fmt.Sprintf("key val: %v\n", kvmap)
-	txtFil.WriteString(kvstr)
-
-	txtFil.WriteString(contentStr)
-
-fmt.Printf("page 1:\n%s", contentStr)
-
 
 	return nil
 
