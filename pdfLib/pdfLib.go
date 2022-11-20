@@ -1004,15 +1004,19 @@ fmt.Println(pagesStr)
 	// Page
 	for pg:=0; pg<(pdf.pageCount ); pg++ {
 
-		pageId := pdf.pages[pg]
 		outstr = fmt.Sprintf("************ Page %d **************\n", pg+1)
 		txtFil.WriteString(outstr)
 
-		pageStr := string(buf[(pdfObjList[pg].contSt):(pdfObjList[pg].contEnd)]) + "\n"
-		txtFil.WriteString(pageStr)
-fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr ********\n",pg +1, pageId, pageStr)
+		id := pdf.pages[pg] -1
 
-		pagObj, err := pdf.parsePage(pageStr, pg +1)
+		pageStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
+		txtFil.WriteString(pageStr)
+
+fmt.Println(pageStr)
+
+fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr ********\n",pg +1, id +1, pageStr)
+
+		pagObj, err := pdf.parsePage(pageStr, pg)
 		if err != nil {
 			outstr = fmt.Sprintf("// error parsing Page %d: %v\n",pg ,err)
 			txtFil.WriteString(outstr)
