@@ -542,6 +542,79 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 	return kvmap, nil
 }
 
+func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, outstr string, err error) {
+
+	var pdfobj pdfObj
+
+	buf := *inbuf
+	endStr := ""
+	objStr := ""
+	linStr := ""
+	ist := pdf.xref + 5
+	istate := 0
+	objId := 0
+	objNum := 0
+	objCount := 0
+	objSt := 0
+	val2 := 0
+	totObj :=0
+
+	for i:= ist; i < pdf.trailer; i++ {
+		if buf[i] == '\n' {
+			linStr = string(buf[ist:i])
+			ist = i+1
+		} else {
+			continue
+		}
+
+		switch istate {
+		case 0:
+			_, err1 := fmt.Sscanf(linStr, "%d %d", &objId, &objNum)
+			if err1 != nil {
+				outstr += fmt.Sprintf("   //error parsing expected object heading [objid num] %s: %v\n", linStr, err)
+				return pdfObjList, outstr, fmt.Errorf("error parsing object heading %s: %v!", linStr, err)
+			}
+			totObj += objNum
+			objStr += linStr + fmt.Sprintf("       // obj id %3d: number: %5d\n", objId, objNum)
+			istate = 1
+		case 1:
+			_, err = fmt.Sscanf(linStr, "%d %d %s", &objSt, &val2, &endStr)
+			if err != nil {
+				outstr += fmt.Sprintf("   //error parsing object %d: %v\n", objCount, err)
+				return pdfObjList, outstr, fmt.Errorf("error parsing object %d: %v!", objCount, err)
+			}
+			if objCount > objNum {
+				outstr += fmt.Sprintf("   //error too many obj ref %d: %v\n", objCount, err)
+				return pdfObjList, outstr, fmt.Errorf("error parsing object %d: %v!", objCount, err)
+			}
+			objStr += linStr + fmt.Sprintf(" // obj id %3d: start: %5d valid: %s\n", objId + objCount, objSt, endStr)
+
+			pdfobj.objId = objId + objCount
+			pdfobj.start = objSt
+			if endStr == "n" {pdfObjList = append(pdfObjList, pdfobj)}
+			if objCount == objNum {istate = 0}
+			objCount++
+		default:
+		}
+
+	} // i
+
+
+	pdf.numObj = totObj
+
+	for i:=0; i< len(pdfObjList); i++ {
+		objEnd := pdf.xref
+		for j:= 0; j<len(pdfObjList); j++ {
+			if (pdfObjList[j].start < objEnd) && (pdfObjList[j].start>pdfObjList[i].start) {
+				objEnd = pdfObjList[j].start
+			}
+		}
+		pdfObjList[i].end = objEnd
+	}
+
+	return pdfObjList, outstr, nil
+}
+
 func (pdf *InfoPdf) parsePages(instr string)(err error) {
 
 //fmt.Printf("\n*****\nparsePages:\n%s\n***\n", instr)
@@ -672,10 +745,15 @@ func (pdf *InfoPdf) parsePage(instr string, pgNum int)(page *pageObj, err error)
 	return page, nil
 }
 
-func (pdf *InfoPdf) parseContent(instr string, pgNum int)(err error) {
+func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
+
+	outstr = fmt.Sprintf("**** Content Page %d ***\n", pgNum)
 
 	objStr, err := pdf.getKVStr(instr)
-	if err != nil {return fmt.Errorf("getVkStr error: %v", err)}
+	if err != nil {
+		outstr += fmt.Sprintf("// getVkStr error: %v\n", err)
+		return outstr, fmt.Errorf("getVkStr error: %v", err)
+	}
 
 
 //fmt.Println("***** objStr parsePage")
@@ -683,15 +761,24 @@ func (pdf *InfoPdf) parseContent(instr string, pgNum int)(err error) {
 //fmt.Println("***** end objstr")
 
 	kvm, err := pdf.getKvMap(objStr)
-	if err != nil {return fmt.Errorf("getVkMap error: %v", err)}
+	if err != nil {
+		outstr += fmt.Sprintf("getVkMap error: %v", err)
+		return outstr, fmt.Errorf("getVkMap error: %v", err)
+	}
 
 	for key, val := range kvm {
+		outstr += fmt.Sprintf("key: %s value: %s\n", key, val)
 		fmt.Printf("key: %s value: %s\n", key, val)
 	}
 
 fmt.Println("*** end Content kv ")
 
 	streamStr, err := pdf.getStream(instr)
+	if err != nil {
+		outstr += streamStr + fmt.Sprintf("stream deflate error: %v\n", err)
+		return outstr, fmt.Errorf("stream deflate error: %v", err)
+	}
+	outstr += streamStr
 
 fmt.Printf("stream length: %d\n", len(streamStr))
 
@@ -700,17 +787,29 @@ fmt.Printf("stream length: %d\n", len(streamStr))
 	bytStream := bytes.NewReader(stbuf)
 
 	bytR, err := zlib.NewReader(bytStream)
-	if err != nil {return fmt.Errorf("stream deflate error: %v", err)}
+	if err != nil {
+		outstr += fmt.Sprintf("stream deflate error: %v\n", err)
+		return outstr, fmt.Errorf("stream deflate error: %v", err)
+	}
 	nbuf := new(strings.Builder)
 	_, err = io.Copy(nbuf, bytR)
-	if err != nil {return fmt.Errorf("stream deflate copy error: %v", err)}
+	if err != nil {
+		outstr += fmt.Sprintf("stream copy error: %v\n", err)
+		return outstr, fmt.Errorf("stream copy error: %v", err)
+	}
+
 	bytR.Close()
+
+	outstr += nbuf.String()
 
 fmt.Printf("stream:\n%s\n****\n", nbuf.String())
 fmt.Println("***** end streamstr")
 
-	return nil
+	return outstr, nil
 }
+
+
+
 
 func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
@@ -766,83 +865,9 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 	xrefStr := fmt.Sprintf("xref       // found keyword xref at %d\n", xref)
 
-	var pdfobj pdfObj
-	var pdfObjList []pdfObj
+	pdf.xref = xref
 
-	endStr := ""
-	objStr := ""
-	linStr := ""
-	ist := xref + 5
-	istate := 0
-	objId := 0
-	objIdNum := 0
-	objCount := 0
-	objSt := 0
-	val2 := 0
-	xrefErr := true
-	totObj :=0
-
-	for i:= ist; i < trailer_start; i++ {
-		if buf[i] == '\n' {
-			linStr = string(buf[ist:i])
-			ist = i+1
-			xrefErr = false
-		} else {
-			continue
-		}
-		switch istate {
-		case 0:
-			_, err1 := fmt.Sscanf(linStr, "%d %d", &objId, &objIdNum)
-			if err1 != nil {
-				outstr = xrefStr
-				outstr += objStr
-				outstr += fmt.Sprintf("   //error parsing expected object heading [objid num] %s: %v\n", linStr, err)
-				outstr += pEndStr
-				txtFil.WriteString(outstr)
-				return fmt.Errorf("error parsing object heading %s: %v!", linStr, err)
-			}
-			totObj += objIdNum
-			objStr += linStr + fmt.Sprintf("       // obj id %3d: number: %5d\n", objId, objIdNum)
-			istate = 1
-		case 1:
-			_, err = fmt.Sscanf(linStr, "%d %d %s", &objSt, &val2, &endStr)
-			if err != nil {
-				outstr = xrefStr
-				outstr += objStr
-				outstr += fmt.Sprintf("   //error parsing object %d: %v\n", objCount, err)
-				outstr += pEndStr
-				txtFil.WriteString(outstr)
-				return fmt.Errorf("error parsing object %d: %v!", objCount, err)
-			}
-			if objCount > objIdNum {
-				outstr = xrefStr
-				outstr += objStr
-				outstr += fmt.Sprintf("   //error too many obj ref %d: %v\n", objCount, err)
-				outstr += pEndStr
-				txtFil.WriteString(outstr)
-				return fmt.Errorf("error parsing object %d: %v!", objCount, err)
-			}
-			objStr += linStr + fmt.Sprintf(" // obj id %3d: start: %5d valid: %s\n", objId + objCount, objSt, endStr)
-//xx
-			pdfobj.objId = objId + objCount
-			pdfobj.start = objSt
-			if endStr == "n" {pdfObjList = append(pdfObjList, pdfobj)}
-			if objCount == objIdNum {istate = 0}
-			objCount++
-		default:
-		}
-
-	} // i
-
-	if xrefErr {
-		outstr = xrefStr
-		outstr += fmt.Sprintf("   //error no valid string after xref!\n")
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("no valid string (no lf) after xref!")
-	}
-
-	pdf.numObj = totObj
+	pdfObjList, objStr, err := pdf.parseXref(&buf)
 
 	outstr = xrefStr
 	outstr += objStr
@@ -850,15 +875,6 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	txtFil.WriteString(outstr)
 
 	// sort
-	for i:=0; i< len(pdfObjList); i++ {
-		objEnd := xref
-		for j:= 0; j<len(pdfObjList); j++ {
-			if (pdfObjList[j].start < objEnd) && (pdfObjList[j].start>pdfObjList[i].start) {
-				objEnd = pdfObjList[j].start
-			}
-		}
-		pdfObjList[i].end = objEnd
-	}
 
 	txtFil.WriteString("**************************\n")
 	pdfObjStr := ""
@@ -883,20 +899,17 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 		}
 		if len(linstr) == 0 {
 			txtFil.WriteString(fmt.Sprintf("Obj %d has no lf\n",i))
-			return fmt.Errorf("Obj %d has no lf",i)
+			return fmt.Errorf("Obj %d has no eol",i)
 		}
+
 //fmt.Printf("obj %d start: %s\n", i, linstr)
+
 		objId :=0
 		val := 0
-		typStr :=""
-		_, err = fmt.Sscanf(linstr,"%d %d %s",&objId, &val, &typStr)
+		_, err = fmt.Sscanf(linstr,"%d %d obj",&objId, &val)
 		if err != nil {
 			txtFil.WriteString(fmt.Sprintf("Obj %d cannot parse: %v\n", err))
 			return fmt.Errorf("Obj %d cannot parse: %v", err)
-		}
-		if typStr != "obj" {
-			txtFil.WriteString(fmt.Sprintf("Obj %d has no \"obj\" string: %s\n", typStr))
-			return fmt.Errorf("Obj %d has no \"obj\" string: %s", typStr)
 		}
 		if objId != pdfObjList[i].objId {
 			txtFil.WriteString(fmt.Sprintf("no match of Obj %d and objId %d \n", objId, pdfObjList[i].objId))
@@ -917,8 +930,8 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 //fmt.Printf("obj %d end: %d %d %s\n", i, contEnd, endp, linstr)
 
 		if linstr != "endobj" {
-			txtFil.WriteString(fmt.Sprintf("Obj %d has no \"endobj\" string: %s\n", i, linStr))
-			return fmt.Errorf("Obj %d has no \"endobj\" string: %s", i, linStr)
+			txtFil.WriteString(fmt.Sprintf("Obj %d has no \"endobj\" string: %s\n", i, linstr))
+			return fmt.Errorf("Obj %d has no \"endobj\" string: %s", i, linstr)
 		}
 //		fmt.Printf("obj %d:\n%s\n", i, buf[contSt:contEnd])
 		pdfObjList[i].contSt = contSt
@@ -942,6 +955,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	txtFil.WriteString(infoStr)
 fmt.Printf("info:\n%s", infoStr)
 
+	//ROOT
 	txtFil.WriteString("************ Root **************\n")
 	id = pdf.rootId - 1
 	rootStr := string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
@@ -963,8 +977,8 @@ fmt.Printf("************ root **************\n%s", rootStr)
 	txtFil.WriteString(outstr)
 
 //fmt.Printf("Obj ROOT with Obj id %d parsed successfully\n", id)
-	// need to parse Pages
 
+	// Pages Obj
 	txtFil.WriteString("************ Pages **************\n")
 
 	id = pdf.pagesId -1
@@ -986,19 +1000,19 @@ fmt.Println(pagesStr)
 	}
 	txtFil.WriteString(outstr)
 
-	// need to name each Page
+
 	// Page
+	for pg:=0; pg<(pdf.pageCount ); pg++ {
 
-	for pg:=1; pg<(pdf.pageCount +1); pg++ {
-
-		outstr = fmt.Sprintf("************ Page %d **************\n", pg)
+		pageId := pdf.pages[pg]
+		outstr = fmt.Sprintf("************ Page %d **************\n", pg+1)
 		txtFil.WriteString(outstr)
 
 		pageStr := string(buf[(pdfObjList[pg].contSt):(pdfObjList[pg].contEnd)]) + "\n"
 		txtFil.WriteString(pageStr)
-fmt.Printf("page 1:\n%s", pageStr)
+fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr ********\n",pg +1, pageId, pageStr)
 
-		pagObj, err := pdf.parsePage(pageStr, pg)
+		pagObj, err := pdf.parsePage(pageStr, pg +1)
 		if err != nil {
 			outstr = fmt.Sprintf("// error parsing Page %d: %v\n",pg ,err)
 			txtFil.WriteString(outstr)
@@ -1009,8 +1023,8 @@ fmt.Printf("page 1:\n%s", pageStr)
 
 
 		// need to parse each Page
-		outstr = fmt.Sprintf("************ Content Page %d **************\n", pg)
-		txtFil.WriteString(outstr)
+//		outstr = fmt.Sprintf("************ Content Page %d **************\n", pg)
+//		txtFil.WriteString(outstr)
 
 //		id = 4
 		id = pagObj.contentId -1
@@ -1018,14 +1032,16 @@ fmt.Printf("page %d: contentId: %d\n", pg, id)
 		contentStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
 
 		// seperate stream and kv pairs
-		err = pdf.parseContent(contentStr, pg)
+		outstr, err = pdf.parseContent(contentStr, pg)
 		if err != nil {
-			outstr = fmt.Sprintf("// error parsing Content %d for Page %d: %v\n",id, pg ,err)
+			outstr += fmt.Sprintf("// error parsing Content %d for Page %d: %v\n",id, pg ,err)
 			txtFil.WriteString(outstr)
 			return fmt.Errorf("error parsing Content %d for Page %d: %v", id, pg, err)
 		}
+		txtFil.WriteString(outstr)
 
-	}
+
+	} // page
 
 	return nil
 
