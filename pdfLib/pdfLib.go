@@ -29,6 +29,7 @@ type InfoPdf struct {
 	sizeObj int
 	numObj int
 	xref int
+	startxref int
 	trailer int
 	trail_root int
 	trail_size int
@@ -94,36 +95,335 @@ func (pdf *InfoPdf) ReadPdf(parseFilnam string) (err error) {
 	return nil
 }
 
-func (pdf *InfoPdf) parseTrailCont(linStr string)(err error) {
+
+func (pdf *InfoPdf) parseTopTwoLines(buf []byte)(outstr string, err error) {
+
+	//read top line
+	end_fl :=0
+	for i:=0; i<len(buf); i++ {
+		if (buf[i] == '\n') {
+			end_fl = i
+			break
+		}
+	}
+	if end_fl ==0 {
+		outstr = "// no eol in first line!\n"
+		return outstr, fmt.Errorf("no eol in first line!")
+	}
+
+	outstr = string(buf[:end_fl]) + "   // "
+
+	if string(buf[:5]) != "%PDF-" {
+		outstr += "no match to \"%%PDF-\" string in first line!\n"
+		return outstr, fmt.Errorf("first line %s string is not \"%%PDF-\"!", string(buf[:5]))
+	}
+
+	verStr := string(buf[5:end_fl])
+	version, err := strconv.ParseFloat(verStr, 32)
+	if err != nil {
+		outstr += fmt.Sprintf("version is not a valid float: %v!\n", err)
+		return outstr, fmt.Errorf("error converting pdf version %s: %v", verStr, err)
+	}
+
+	if (version < 1.0) || (version > 2.0) {
+		outstr += fmt.Sprintf("invalid pdf version %.2f\n", version)
+		return outstr, fmt.Errorf("invalid pdf version %.2f", version)
+	}
+
+	outstr += "pdf version: " + verStr + " valid.\n"
+
+	// second line
+	end_sl :=0
+	for i:=end_fl+1; i<len(buf); i++ {
+		if (buf[i] == '\n') {
+			end_sl = i
+			break
+		}
+	}
+
+	if end_sl ==0 {
+		outstr += "// no eol in second line\n"
+		return outstr, fmt.Errorf("no eol in second line!")
+	}
+
+	outstr += string(buf[end_fl+1:end_sl]) + "      // "
+
+	start_sl := 0
+	for i:=end_fl+ 1; i< end_sl; i++ {
+		if buf[i] == '%' {
+			start_sl = i
+			break
+		}
+	}
+
+	if start_sl == 0 {
+		outstr += " No char % in second line\n"
+		return outstr, fmt.Errorf("no % starting second line!")
+	}
+
+	if (end_sl - start_sl-1) != 4 {
+		outstr += fmt.Sprintf(" No 4 chars after '%': %d!\n", end_sl - start_sl-1)
+		return outstr, fmt.Errorf(" no 4 chars after '%' char!")
+	}
+
+	for i:=start_sl + 1; i< end_sl; i++ {
+		if !(buf[i] > 120) {
+			outstr += fmt.Sprintf(" char %q not valid!\n", buf[i])
+			return outstr, fmt.Errorf("error char %q not valid!", buf[i])
+		}
+	}
+
+	outstr += "second line valid!\n"
+
+	return outstr, nil
+}
+
+func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
+
+	buf := *inbuf
+	llEnd := len(buf) -1
+
+	for i:=llEnd; i>-1; i-- {
+		if buf[i] != '\n' {
+			llEnd = i
+			break;
+		}
+	}
+
+	if llEnd == len(buf) -1 {
+		outstr = "// no beginning for last line\n"
+		return outstr, fmt.Errorf("no beginning for last line!")
+	}
+
+	// now we have the real last line which should contain %%EOF
+	start_ll :=0
+
+	for i:=llEnd; i>llEnd - 20; i-- {
+		if buf[i] == '\n' {
+			start_ll = i+1
+			break
+		}
+	}
+
+	if start_ll ==0 {
+		outstr = "// cannot find begin of last line!\n"
+		return outstr, fmt.Errorf("cannot find begin of last line!")
+	}
+
+	llstr := string(buf[start_ll:llEnd+1])
+	outstr = llstr + "      // "
+
+	if llstr != "%%EOF" {
+		outstr += fmt.Sprintf("last line not valid: %s!\n",llstr)
+		return outstr, fmt.Errorf("last line %s is not \"%%EOF\"!", llstr)
+	}
+
+	outstr += "last line valid!\n"
+//	txtFil.WriteString(outstr)
+
+	//next we need to check second last line which should contain a int number
+	sl_end:=start_ll-2
+	if buf[sl_end] == '\n' {
+		sl_end--
+	}
+	startxref_end :=0
+
+	for i:=sl_end; i>0; i-- {
+		if buf[i] == '\n' {
+			startxref_end = i
+			break
+		}
+	}
+	if startxref_end ==0 {
+		outstr += "// cannot find beginning of second to last line!\n"
+		return outstr, fmt.Errorf("cannot find beginning of second to last line!")
+	}
+
+	slstr := string(buf[startxref_end+1:sl_end+1])
+	xref, err := strconv.Atoi(slstr)
+	if err != nil {
+		outstr = slstr + fmt.Sprintf("     // cannot convert second last line %s to int: %v\n", slstr, err) + outstr
+		return outstr, fmt.Errorf("second last line not an int: %s",slstr)
+	}
+
+	xrefstr := string(buf[xref: (xref+4)])
+	if xrefstr != "xref" {
+		outstr = slstr + fmt.Sprintf(" // xref does not point to xref string in file: getting %d %s! \n", len(xrefstr), xrefstr) +outstr
+		return outstr, fmt.Errorf("xref pointer not pointing to xref: %s",slstr)
+	}
+
+	outstr = slstr + fmt.Sprintf("       // second last line valid pointer to xref %d\n", xref) + outstr
+
+	//third last line
+	// the third last line should have the word "startxref"
+	tl_end := startxref_end -1
+	// if the string ends with two chars /r + /n instead of one char
+	if buf[tl_end] == '\n' {tl_end--}
+
+	startxref_start :=0
+
+	for i:=tl_end; i>0; i-- {
+		if buf[i] == '\n' {
+			startxref_start = i+1
+			break
+		}
+	}
+	if startxref_start ==0 {
+		outstr = "// cannot find beginning of third to last line!\n" + outstr
+		return outstr, fmt.Errorf("cannot find beginning to third last line!")
+	}
+
+	tlstr := string(buf[startxref_start:tl_end+1])
+//	fmt.Printf("third last line: %s\n", tlstr)
+	if tlstr != "startxref" {
+		outstr = tlstr + " //  third line from end does not contain \"startxref\" keyword!" + tlstr + "\n" + outstr
+		return outstr, fmt.Errorf("third line from end, s, does not contain \"startxref\" keyword! ", tlstr)
+	}
+
+	pdf.startxref = startxref_start
+	outstr = tlstr + "  // valid third from end line\n" + outstr
+
+	return outstr, nil
+}
+
+func (pdf *InfoPdf) parseTrailer(inbuf *[]byte)(outstr string, err error) {
+
+	buf := *inbuf
+	trailEnd := 0
+	for i:=pdf.startxref; i> pdf.startxref-10; i-- {
+		if buf[i] == '>' {
+			if buf[i-1] == '>' {
+				trailEnd = i
+				break
+			}
+		}
+	}
+
+	if trailEnd == 0 {
+		outstr = "// cannot find closing angular brackets for trailer!\n"
+		return outstr, fmt.Errorf("cannot find closing angular bracket for trailer!")
+	}
+
+	trailStart := 0
+	for i:=trailEnd; i> 0; i-- {
+		if buf[i] == '<' {
+			if buf[i-1] == '<' {
+				trailStart = i
+				break
+			}
+		}
+	}
+
+	if trailStart == 0 {
+		outstr = "// cannot find opening angular brackets for trailer!\n"
+		return outstr, fmt.Errorf("cannot find opening angular bracket for trailer!")
+	}
+
+	trailer_start :=0
+	trailer_end :=0
+
+	for i:=trailStart -1 ; i>trailStart - 21; i-- {
+		if buf[i] == '\n' {
+			trailer_end = i
+			break
+		}
+	}
+
+	if trailer_end == 0 {
+		outstr = "// cannot find end of line with keyword \"trailer\"!\n"
+		return outstr, fmt.Errorf("cannot find end of line with keyword \"trailer\"!")
+	}
+
+	// find beginning of line with key word trailer
+	for i:=trailer_end -1 ; i>trailer_end - 21; i-- {
+		if buf[i] == '\n' {
+			trailer_start = i+1
+			break
+		}
+	}
+	if trailer_start ==0 {
+		outstr = "// cannot find beginning of line with keyword \"trailer\"!\n"
+		return outstr, fmt.Errorf("cannot find beginning of line with keyword \"trailer\"!")
+	}
+
+//	fmt.Printf("trailer start: %d end: %d\n", trailer_start, trailer_end)
+	trailerStr := string(buf[trailer_start:trailer_end])
+//	fmt.Printf("trailer line: %s\n", trailerStr)
+	if trailerStr != "trailer" {
+		outstr = fmt.Sprintf("// no keyword \"trailer\" found in %s!\n", trailerStr)
+		return outstr, fmt.Errorf("no keyword \"trailer\" found in %s!", trailerStr)
+	}
+
+	pdf.trailer = trailer_start
+//	trailStart--
+//	trailEnd++
+//	trailContentStr := string(buf[trailStart:trailEnd]) + "\n"
+	outstr = trailerStr + "     // correct trailer header \n"
+
+	// parseTrailContentStr
+	trailCont := string(buf[trailStart+2:trailEnd-2]) + "\n"
+//fmt.Printf("trailer Con:\n%s\n",trailCont)
+	tConCount:=0
+	linStr := ""
+	ist := 0
+	for i:=ist; i< len(trailCont); i++ {
+		if trailCont[i] == '\n' {
+			linStr = string(trailCont[ist:i])
+			trailStr, err := pdf.parseTrailCont(linStr)
+			if err != nil {
+				outstr += trailStr
+				return outstr, fmt.Errorf("could not parse trailer Content: %v", err)
+			}
+			ist = i+1
+//fmt.Printf("trail line %d: %s\n", tConCount, linStr)
+			tConCount++
+			outstr += trailStr
+		}
+	}
+
+	return outstr, nil
+}
+
+func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
 
 	keyStr := string(linStr[1:5])
 	switch keyStr {
 	case "Size":
 		size:= 0
 		_, err = fmt.Sscanf(string(linStr[5:]),"%d",&size)
-		if err != nil {return fmt.Errorf("could not parse Size value: %v", err)}
+		if err != nil {
+			outstr += fmt.Sprintf("Size: could not parse Size value: %v", err)
+			return outstr, fmt.Errorf("could not parse Size value: %v", err)
+		}
 		pdf.sizeObj = size
+		outstr += fmt.Sprintf(" Size: %d parsed correctly\n", size)
 
 	case "Info":
 		objId := 0
 		val := 0
-		endStr := ""
-		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d %s",&objId, &val, &endStr)
-		if err != nil {return fmt.Errorf("could not parse Info value: %v", err)}
+		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
+		if err != nil {
+			outstr += fmt.Sprintf("Info: %s:: could not parse Info: %v", string(linStr[5:]), err)
+			return outstr, fmt.Errorf("Info: could not parse value: %v", err)
+		}
 		pdf.infoId = objId
-
+		outstr += fmt.Sprintf("Info: objId: %d  ref: %d R parsed successfully\n", objId, val)
 	case "Root":
 		objId := 0
 		val := 0
-		endStr := ""
-		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d %s",&objId, &val, &endStr)
-		if err != nil {return fmt.Errorf("could not parse Root value: %v", err)}
+		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
+		if err != nil {
+			outstr += fmt.Sprintf("Root: %s:: could not parse Info: %v", string(linStr[5:]), err)
+			return outstr, fmt.Errorf("Root: could not parse value: %v", err)
+		}
 		pdf.rootId = objId
+		outstr += fmt.Sprintf("Root: objId: %d  ref: %d R parsed successfully\n", objId, val)
 
 	default:
-		return fmt.Errorf("invalid key word: %s", keyStr)
+		outstr = fmt.Sprintf("%s is not a recognized keyword in Trailer\n", keyStr)
+		return outstr, fmt.Errorf("invalid key word: %s", keyStr)
 	}
-	return nil
+	return outstr, nil
 }
 
 func (pdf *InfoPdf) getKVStr(instr string)(outstr string, err error) {
@@ -190,19 +490,30 @@ fmt.Printf("key: %s val: %s\n", key, val)
 
 func (pdf *InfoPdf) getStream(instr string)(outstr string, err error) {
 
+fmt.Printf("******* getstream instr\n")
+fmt.Println(instr)
+fmt.Printf("******* end ***\n")
+
 	stPos := -1
 	endPos := 0
 
+//after stream there is a linefeed
 	for i:=0; i< len(instr); i++ {
 		if instr[i] == 's' {
 			if string(instr[i:i+6]) == "stream" {
-				stPos = i +6
+				stPos = i +7
 				break
 			}
 		}
 	}
 
 	if stPos == -1 {return "", fmt.Errorf("no \"stream\" keyword found!")}
+
+//	if instr[stPos +1] == '\n' {stPos = stPos +1}
+
+	for i:=stPos-1; i< stPos+2; i++ {
+		fmt.Printf("i %d: %q\n",i ,instr[i])
+	}
 
 	for i:=len(instr)-9; i> stPos; i-- {
 		if instr[i] == 'e' {
@@ -217,6 +528,7 @@ func (pdf *InfoPdf) getStream(instr string)(outstr string, err error) {
 
 	outstr = instr[stPos: endPos]
 
+fmt.Printf("stream len %d\n", len(outstr))
 	return outstr, nil
 }
 
@@ -382,12 +694,36 @@ func (pdf *InfoPdf) parseContent(instr string, pgNum int)(err error) {
 	objStr, err := pdf.getKVStr(instr)
 	if err != nil {return fmt.Errorf("getVkStr error: %v", err)}
 
+
 fmt.Println("***** objStr parsePage")
 fmt.Println(objStr)
 fmt.Println("***** end objstr")
+
+	kvm, err := pdf.getKvMap(objStr)
+	if err != nil {return fmt.Errorf("getVkMap error: %v", err)}
+
+	for key, val := range kvm {
+		fmt.Printf("key: %s value: %s\n", key, val)
+	}
+
+fmt.Println("*** end Content kv ")
+
 	streamStr, err := pdf.getStream(instr)
 
-fmt.Println(streamStr)
+fmt.Printf("stream length: %d\n", len(streamStr))
+
+	stbuf := []byte(streamStr)
+
+	bytStream := bytes.NewReader(stbuf)
+
+	bytR, err := zlib.NewReader(bytStream)
+	if err != nil {return fmt.Errorf("stream deflate error: %v", err)}
+	nbuf := new(strings.Builder)
+	_, err = io.Copy(nbuf, bytR)
+	if err != nil {return fmt.Errorf("stream deflate copy error: %v", err)}
+	bytR.Close()
+
+fmt.Printf("stream:\n%s\n****\n", nbuf.String())
 fmt.Println("***** end streamstr")
 
 	return nil
@@ -406,363 +742,56 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	_, err = (pdf.fil).Read(buf)
 	if err != nil {return fmt.Errorf("error Read: %v", err)}
 
-	//read top line
-	end_fl :=0
-	for i:=0; i<len(buf); i++ {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			end_fl = i
-			break
-		}
-	}
-	if end_fl ==0 {
-		outstr = "no end to first line!\n"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("no end to first line!")
-	}
-
-	outstr = string(buf[:end_fl]) + "   // "
-
-	if string(buf[:5]) != "%PDF-" {
-		outstr += "no '%%PDF-' string in first line\n"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("first line %s string is not \"%%PDF-\"!", string(buf[:5]))
-	}
-
-	verStr := string(buf[5:end_fl])
-	version, err := strconv.ParseFloat(verStr, 32)
-	if err != nil {
-		outstr += "pdf- not a valid float as version!\n"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("error converting pdf version %s: %v", verStr, err)
-	}
-
-	if (version < 1.0) || (version > 2.0) {
-		outstr += fmt.Sprintf("invalid pdf version %.2f\n", version)
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("invalid pdf version %.2f", version)
-	}
-
-	outstr += "pdf version: " + verStr + " valid.\n"
+	// 40 character should be more than enough
+	outstr , err = pdf.parseTopTwoLines(buf[:40])
 	txtFil.WriteString(outstr)
+	if err != nil {return fmt.Errorf("parseTopTwoLines: %v",err)}
 
-	// second line
-	end_sl :=0
-	for i:=end_fl+1; i<len(buf); i++ {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			end_sl = i
-			break
-		}
-	}
-
-	if end_sl ==0 {
-		outstr = "// no valid second line\n"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("error ParsePdf: invalid second line!")
-	}
-
-	outstr = string(buf[end_fl+1:end_sl]) + "      // "
-
-	start_sl := 0
-	for i:=end_fl+ 1; i< end_sl; i++ {
-		if buf[i] == '%' {
-			start_sl = i
-			break
-		}
-	}
-
-	if start_sl == 0 {
-		outstr += " No char % in second line\n"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("error no % starting second line!")
-	}
-
-	if (end_sl - start_sl-1) != 4 {
-		outstr += fmt.Sprintf(" Not 4 chars after '%': %d!\n", end_sl - start_sl-1)
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("error not 4 valid chars after '%' char!")
-	}
-
-	for i:=start_sl + 1; i< end_sl; i++ {
-		if !(buf[i] > 120) {
-			outstr += fmt.Sprintf(" char %q not valid!\n", buf[i])
-			txtFil.WriteString(outstr)
-			return fmt.Errorf("error char %q not valid!", buf[i])
-		}
-	}
-
-	outstr += "second line valid!\n"
-	txtFil.WriteString(outstr)
-
-//	fmt.Printf("second line: %s\n", string(buf[end_fl+1:end_sl]))
 
 	// last line
 	// first get rid of empty lines at the end
-	ll_end := len(buf) -1
 
-	for i:=ll_end; i>end_sl; i-- {
-		if (buf[i] != '\r') && (buf[i] != '\n') {
-			ll_end = i
-			break;
-		}
-	}
-
-	// now we have the real last line which should contain %%EOF
-	start_ll :=0
-	for i:=ll_end; i>end_sl; i-- {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			start_ll = i+1
-			break
-		}
-	}
-
-	if start_ll ==0 {
-		outstr = "cannot find end of next to last line!"
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find end of next to last line!")
-	}
-
-	llstr := string(buf[start_ll:ll_end+1])
-	outstr = llstr + "      // "
-
-	if llstr != "%%EOF" {
-		outstr += fmt.Sprintf("last line not valid: %s!\n",llstr)
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("last line %s is not \"%%EOF\"!", llstr)
-	}
-
-	laststr := outstr + "last line valid!\n"
-//	txtFil.WriteString(outstr)
-
-	//next we need to check second last line which should contain a int number
-	sl_end:=start_ll-2
-	if (buf[sl_end] == '\r') || (buf[sl_end] == '\n') {
-		sl_end--
-	}
-	startxref_end :=0
-
-	for i:=sl_end; i>0; i-- {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			startxref_end = i
-			break
-		}
-	}
-	if startxref_end ==0 {
-		outstr = "// cannot find beginning of second to last line!\n"
-		outstr += laststr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find beginning of second to last line!")
-	}
-
-	slstr := string(buf[startxref_end+1:sl_end+1])
-	xref, err := strconv.Atoi(slstr)
-	if err != nil {
-		outstr = slstr + " // "
-		outstr += fmt.Sprintf("cannot convert second last line %s to int: %v\n", slstr, err)
-		outstr += laststr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("second last line not an int: %s",slstr)
-	}
-
-	xrefstr := string(buf[xref: (xref+4)])
-	if xrefstr != "xref" {
-		outstr = slstr + " // "
-		outstr += fmt.Sprintf("xref does not point to xref string in file: getting %d %s! \n", len(xrefstr), xrefstr)
-		outstr += laststr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("xref pointer not pointing to xref: %s",slstr)
-	}
-
-	slstr += fmt.Sprintf("       // second last line valid pointer to xref %d\n", xref)
-//	txtFil.WriteString(slstr)
-//	txtFil.WriteString(laststr)
-
-	//third last line
-	// the third last line should have the word "startxref"
-	tl_end := startxref_end -1
-	// if the string ends with two chars /r + /n instead of one char
-	if (buf[tl_end] == '\r') || (buf[tl_end] == '\n') {
-		tl_end--
-	}
-	startxref_start :=0
-
-	for i:=tl_end; i>0; i-- {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			startxref_start = i+1
-			break
-		}
-	}
-	if startxref_end ==0 {
-		outstr = "// cannot find beginning of third to last line!\n"
-		outstr += slstr
-		outstr += laststr
-		txtFil.WriteString(outstr)
-
-		return fmt.Errorf("cannot find beginning to third last line!")
-	}
-	tlstr := string(buf[startxref_start:tl_end+1])
-//	fmt.Printf("third last line: %s\n", tlstr)
-	if tlstr != "startxref" {
-		outstr = tlstr + " //  third line from end does not contain \"startxref\" keyword!" + tlstr + "\n"
-		outstr += slstr
-		outstr += laststr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("third line from end, s, does not contain \"startxref\" keyword! ", tlstr)
-	}
-
-	tlstr += "  // valid third from end line\n"
-
-	outstr = tlstr
-	outstr += slstr
-	outstr += laststr
+	outstr , err = pdf.parseLast3Lines(&buf)
+	txtFil.WriteString(outstr)
+	if err != nil {return fmt.Errorf("parseLast3Lines: %v",err)}
 	pEndStr := outstr
 
+	return nil
+
 	// find trailer
-	trailEnd := 0
-	for i:=startxref_start; i> 0; i-- {
-		if buf[i] == '>' {
-			if buf[i-1] == '>' {
-				trailEnd = i
-				break
-			}
-		}
-	}
+	outstr , err = pdf.parseTrailer(&buf)
+	txtFil.WriteString(outstr + pEndStr)
+	if err != nil {return fmt.Errorf("parseLast3Lines: %v",err)}
 
-	if trailEnd == 0 {
-		outstr = "// cannot find closing angular brackets for trailer!\n"
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find closing angular bracket for trailer!")
-	}
-
-	trailStart := 0
-	for i:=trailEnd; i> 0; i-- {
-		if buf[i] == '<' {
-			if buf[i-1] == '<' {
-				trailStart = i
-				break
-			}
-		}
-	}
-
-	if trailStart == 0 {
-		outstr = "// cannot find opening angular brackets for trailer!\n"
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find opening angular bracket for trailer!")
-	}
-
-	trailer_start :=0
-	trailer_end :=0
-
-	for i:=trailStart -1 ; i>0; i-- {
-		if (buf[i] == '\n') || (buf[i] == '\r') {
-			trailer_end = i
-			break
-		}
-	}
-
-	if trailer_end == 0 {
-		outstr = "// cannot find end of line with keyword \"trailer\"!\n"
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find end of line with keyword \"trailer\"!")
-	}
-
-	// find beginning of line with key word trailer
-	for i:=trailer_end -1 ; i>0; i-- {
-		if (buf[i] == '\r') || (buf[i] == '\n') {
-			trailer_start = i+1
-			break
-		}
-	}
-	if trailer_start ==0 {
-		outstr = "// cannot find beginning of line with keyword \"trailer\"!\n"
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find beginning of line with keyword \"trailer\"!")
-	}
-
-//	fmt.Printf("trailer start: %d end: %d\n", trailer_start, trailer_end)
-	trailerStr := string(buf[trailer_start:trailer_end])
-//	fmt.Printf("trailer line: %s\n", trailerStr)
-	if trailerStr != "trailer" {
-		outstr = fmt.Sprintf("// trailer line contains %s not \"trailer\"!\n", trailerStr)
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("trailer line contains %s not \"trailer\"!", trailerStr)
-	}
-
-	trailStart--
-	trailEnd++
-	trailContentStr := string(buf[trailStart:trailEnd]) + "\n"
-	trailerStr = trailerStr + "     // correct trailer header \n"
-
-	// parseTrailContentStr
-	trailCont := string(buf[trailStart+2:trailEnd-2]) + "\n"
-//fmt.Printf("trailer Con:\n%s\n",trailCont)
-
-	tConCount:=0
-	linStr := ""
-	ist := 0
-	for i:=ist; i< len(trailCont); i++ {
-		if trailCont[i] == '\n' {
-			linStr = string(trailCont[ist:i])
-			err = pdf.parseTrailCont(linStr)
-			if err != nil {
-				outstr = trailerStr
-				outstr += trailContentStr
-				outstr += fmt.Sprintf("// could not parse trailer Content: %v", err)
-				outstr += pEndStr
-				txtFil.WriteString(outstr)
-				return fmt.Errorf("could not parse trailer Content: %v", err)
-			}
-			ist = i+1
-//fmt.Printf("trail line %d: %s\n", tConCount, linStr)
-			tConCount++
-		}
-	}
-
-	outstr = trailerStr
-	outstr += trailCont
-	outstr += pEndStr
-
-	pEndStr = trailerStr + trailCont + pEndStr
-
-
-	// parse trailer section
-	// todo
+	pEndStr = outstr + pEndStr
 
 	// find beginning of xref section
-	xrefStart :=0
+	trailer_start := pdf.trailer
+
+	xref :=0
 	for i:=trailer_start -1 ; i>0; i-- {
 		if (buf[i] == 'x') {
-			xrefStart = i
-			break
+			if string(buf[i: i+4]) == "xref" {
+				xref = i
+				break
+			}
 		}
 	}
 
-	if xrefStart ==0 {
-		outstr = fmt.Sprintf("// cannot find xref beginning of line!\n")
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
+	if xref ==0 {
+		outstr = fmt.Sprintf("// cannot find xref beginning of line!\n") + outstr
 		return fmt.Errorf("cannot find xref beginning of line!")
 	}
 
-	if string(buf[xref: xref+4]) != "xref" {
-		outstr = fmt.Sprintf("// cannot find keyword xref! found %s\n", string(buf[xref:xref+4]))
-		outstr += pEndStr
-		txtFil.WriteString(outstr)
-		return fmt.Errorf("cannot find xref beginning of line!")
-	}
-	xrefStr := string(buf[xref:xref+4]) + fmt.Sprintf("       // found keyword xref at %d\n", xref)
+	xrefStr := fmt.Sprintf("xref       // found keyword xref at %d\n", xref)
 
 	var pdfobj pdfObj
 	var pdfObjList []pdfObj
 
 	endStr := ""
 	objStr := ""
-	linStr = ""
-	ist = xref + 5
+	linStr := ""
+	ist := xref + 5
 	istate := 0
 	objId := 0
 	objIdNum := 0
@@ -1663,6 +1692,7 @@ func (pdf *InfoPdf) AnalysePdf(outfilnam string)(err error) {
 	stidxend := strings.Index(dbufStr,"endstream")
 	streamStr := dbufStr[stidxst+len("stream")+1:stidxend-1]
 	fmt.Printf("Stream: %d\n",len(streamStr))
+
 	stbuf := []byte(streamStr)
 
 	b := bytes.NewReader(stbuf)
