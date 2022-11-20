@@ -181,48 +181,33 @@ func (pdf *InfoPdf) parseTopTwoLines(buf []byte)(outstr string, err error) {
 func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
 
 	buf := *inbuf
+
 	llEnd := len(buf) -1
 
-	for i:=llEnd; i>-1; i-- {
-		if buf[i] != '\n' {
-			llEnd = i
-			break;
-		}
-	}
-
-	if llEnd == len(buf) -1 {
-		outstr = "// no beginning for last line\n"
-		return outstr, fmt.Errorf("no beginning for last line!")
-	}
-
 	// now we have the real last line which should contain %%EOF
-	start_ll :=0
+	llStart :=0
 
-	for i:=llEnd; i>llEnd - 20; i-- {
-		if buf[i] == '\n' {
-			start_ll = i+1
-			break
+	for i:=llEnd-4; i>llEnd - 20; i-- {
+		if buf[i] == '%' {
+			if string(buf[i:]) == `%%EOF` {
+				llStart = i
+				break;
+			}
 		}
 	}
 
-	if start_ll ==0 {
+	llEnd = llStart + 4
+
+	if llStart ==0 {
 		outstr = "// cannot find begin of last line!\n"
 		return outstr, fmt.Errorf("cannot find begin of last line!")
 	}
 
-	llstr := string(buf[start_ll:llEnd+1])
-	outstr = llstr + "      // "
-
-	if llstr != "%%EOF" {
-		outstr += fmt.Sprintf("last line not valid: %s!\n",llstr)
-		return outstr, fmt.Errorf("last line %s is not \"%%EOF\"!", llstr)
-	}
-
-	outstr += "last line valid!\n"
-//	txtFil.WriteString(outstr)
+	llstr := string(buf[llStart:llEnd+1])
+	outstr += llstr + "      // last line valid!\n"
 
 	//next we need to check second last line which should contain a int number
-	sl_end:=start_ll-2
+	sl_end:=llStart-2
 	if buf[sl_end] == '\n' {
 		sl_end--
 	}
