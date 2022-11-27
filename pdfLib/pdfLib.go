@@ -227,13 +227,7 @@ func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
 	xref, err := strconv.Atoi(slstr)
 	if err != nil {
 		outstr = slstr + fmt.Sprintf("     // cannot convert second last line %s to int: %v\n", slstr, err) + outstr
-		return outstr, fmt.Errorf("second last line not an int: %s",slstr)
-	}
-
-	xrefstr := string(buf[xref: (xref+4)])
-	if xrefstr != "xref" {
-		outstr = slstr + fmt.Sprintf(" // xref does not point to xref string in file: getting %d %s! \n", len(xrefstr), xrefstr) +outstr
-		return outstr, fmt.Errorf("xref pointer not pointing to xref: %s",slstr)
+		return outstr, fmt.Errorf("second last line not an int: %s", slstr)
 	}
 
 	outstr = slstr + fmt.Sprintf("       // second last line valid pointer to xref %d\n", xref) + outstr
@@ -241,8 +235,10 @@ func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
 	//third last line
 	// the third last line should have the word "startxref"
 	tl_end := startxref_end -1
+
 	// if the string ends with two chars /r + /n instead of one char
 	if buf[tl_end] == '\n' {tl_end--}
+
 
 	startxref_start :=0
 
@@ -258,6 +254,18 @@ func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
 	}
 
 	tlstr := string(buf[startxref_start:tl_end+1])
+
+	if int(pdf.filSize) < xref {
+		outstr = tlstr + fmt.Sprintf(" //  startref points to invalid file location: %d file size: %d\n", xref, pdf.filSize ) + outstr
+		return outstr, fmt.Errorf("startref points to invalid file location ", tlstr)
+	}
+
+	xrefstr := string(buf[xref: (xref+4)])
+	if xrefstr != "xref" {
+		outstr = slstr + fmt.Sprintf(" // xref does not point to xref string in file: getting %d %s! \n", len(xrefstr), xrefstr) +outstr
+		return outstr, fmt.Errorf("xref pointer not pointing to xref: %s",slstr)
+	}
+
 //	fmt.Printf("third last line: %s\n", tlstr)
 	if tlstr != "startxref" {
 		outstr = tlstr + " //  third line from end does not contain \"startxref\" keyword!" + tlstr + "\n" + outstr
@@ -807,8 +815,6 @@ fmt.Println("***** end streamstr")
 
 	return outstr, nil
 }
-
-
 
 
 func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
