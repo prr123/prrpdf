@@ -387,28 +387,28 @@ func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
 			return outstr, fmt.Errorf("could not parse Size value: %v", err)
 		}
 		pdf.sizeObj = size
-		outstr += fmt.Sprintf(" Size: %d parsed correctly\n", size)
+		outstr += fmt.Sprintf("  Size: %d parsed correctly\n", size)
 
 	case "Info":
 		objId := 0
 		val := 0
 		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
 		if err != nil {
-			outstr += fmt.Sprintf("Info: %s:: could not parse Info: %v", string(linStr[5:]), err)
+			outstr += fmt.Sprintf("  Info: %s:: could not parse Info: %v", string(linStr[5:]), err)
 			return outstr, fmt.Errorf("Info: could not parse value: %v", err)
 		}
 		pdf.infoId = objId
-		outstr += fmt.Sprintf("Info: objId: %d  ref: %d R parsed successfully\n", objId, val)
+		outstr += fmt.Sprintf("  Info: objId: %d  ref: %d R parsed successfully\n", objId, val)
 	case "Root":
 		objId := 0
 		val := 0
 		_, err = fmt.Sscanf(string(linStr[5:]),"%d %d R",&objId, &val)
 		if err != nil {
-			outstr += fmt.Sprintf("Root: %s:: could not parse Info: %v", string(linStr[5:]), err)
+			outstr += fmt.Sprintf("  Root: %s:: could not parse Info: %v", string(linStr[5:]), err)
 			return outstr, fmt.Errorf("Root: could not parse value: %v", err)
 		}
 		pdf.rootId = objId
-		outstr += fmt.Sprintf("Root: objId: %d  ref: %d R parsed successfully\n", objId, val)
+		outstr += fmt.Sprintf("  Root: objId: %d  ref: %d R parsed successfully\n", objId, val)
 
 	default:
 		outstr = fmt.Sprintf("%s is not a recognized keyword in Trailer\n", keyStr)
@@ -544,13 +544,13 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 	_, err = fmt.Sscanf(str,"%d %d %s", &pagesId, &val, &endStr)
 	if err != nil {return kvmap, fmt.Errorf("parseRoot: cannot parse value %s of \"Pages\": %v", str, err)}
 
-	if (pagesId < 1) || (pagesId> pdf.numObj) {return kvmap, fmt.Errorf("parseRoot: Pages object id outside range: %d", pagesId)}
+	if (pagesId < 1) || (pagesId> pdf.numObj) {return kvmap, fmt.Errorf("parseRoot: Pages object id outside range: %d", pagesId + 1)}
 	pdf.pagesId = pagesId
 
 	return kvmap, nil
 }
 
-func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, outstr string, err error) {
+func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, objstr string, err error) {
 
 	var pdfobj pdfObj
 
@@ -566,6 +566,8 @@ func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, outstr string,
 	objSt := 0
 	val2 := 0
 	totObj :=0
+
+	outstr :=""
 
 	for i:= ist; i < pdf.trailer; i++ {
 		if buf[i] == '\n' {
@@ -620,7 +622,7 @@ func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, outstr string,
 		pdfObjList[i].end = objEnd
 	}
 
-	return pdfObjList, outstr, nil
+	return pdfObjList, objStr, nil
 }
 
 func (pdf *InfoPdf) parsePages(instr string)(err error) {
@@ -755,7 +757,7 @@ func (pdf *InfoPdf) parsePage(instr string, pgNum int)(page *pageObj, err error)
 
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
-	outstr = fmt.Sprintf("**** Content Page %d ***\n", pgNum)
+	outstr = fmt.Sprintf("**** KV ****\n")
 
 	objStr, err := pdf.getKVStr(instr)
 	if err != nil {
@@ -774,6 +776,7 @@ func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err err
 		return outstr, fmt.Errorf("getVkMap error: %v", err)
 	}
 
+
 	for key, val := range kvm {
 		outstr += fmt.Sprintf("key: %s value: %s\n", key, val)
 		fmt.Printf("key: %s value: %s\n", key, val)
@@ -786,9 +789,15 @@ fmt.Println("*** end Content kv ")
 		outstr += streamStr + fmt.Sprintf("stream deflate error: %v\n", err)
 		return outstr, fmt.Errorf("stream deflate error: %v", err)
 	}
-	outstr += streamStr
+	if len(streamStr) == 0 {
+		outstr += "no stream\n"
+		return outstr, nil
+	}
+
+//	outstr += streamStr
 
 fmt.Printf("stream length: %d\n", len(streamStr))
+	outstr += fmt.Sprintf("**** stream [length: %d] ****\n", len(streamStr))
 
 	stbuf := []byte(streamStr)
 
@@ -832,6 +841,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 	// 40 character should be more than enough
 	outstr , err = pdf.parseTopTwoLines(buf[:40])
+	outstr = "**** top two lines ***\n" + outstr
 	txtFil.WriteString(outstr)
 	if err != nil {return fmt.Errorf("parseTopTwoLines: %v",err)}
 
@@ -839,17 +849,24 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	// last line
 	// first get rid of empty lines at the end
 
-	outstr , err = pdf.parseLast3Lines(&buf)
-	txtFil.WriteString(outstr)
-	if err != nil {return fmt.Errorf("parseLast3Lines: %v",err)}
-	pEndStr := outstr
+	l3LinStr , err := pdf.parseLast3Lines(&buf)
+	outstr = "**** last three lines ***\n"
+	if err != nil {
+		txtFil.WriteString(outstr + l3LinStr)
+		return fmt.Errorf("parseLast3Lines: %v",err)
+	}
+	pEndStr := outstr + l3LinStr
 
 	// find trailer
-	outstr , err = pdf.parseTrailer(&buf)
-	txtFil.WriteString(outstr + pEndStr)
-	if err != nil {return fmt.Errorf("parseLast3Lines: %v",err)}
 
-	pEndStr = outstr + pEndStr
+	trailerStr , err := pdf.parseTrailer(&buf)
+	trailerStr = "**** trailer ****\n" + trailerStr
+	if err != nil {
+		txtFil.WriteString(trailerStr + pEndStr)
+		return fmt.Errorf("parseLast3Lines: %v",err)
+	}
+
+	pEndStr = trailerStr + pEndStr
 
 	// find beginning of xref section
 	trailer_start := pdf.trailer
@@ -955,15 +972,17 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 
 	// info object
-	txtFil.WriteString("************Info**************\n")
 	id := pdf.infoId - 1
+	hdStr := fmt.Sprintf("************ Info [Obj: %d] **************\n", id+1)
+	txtFil.WriteString(hdStr)
 	infoStr := string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
 	txtFil.WriteString(infoStr)
 fmt.Printf("info:\n%s", infoStr)
 
 	//ROOT
-	txtFil.WriteString("************ Root **************\n")
 	id = pdf.rootId - 1
+	hdStr = fmt.Sprintf("************ Root [Obj: %d] **************\n", id+1)
+	txtFil.WriteString(hdStr)
 	rootStr := string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
 	txtFil.WriteString(rootStr)
 fmt.Printf("************ root **************\n%s", rootStr)
@@ -985,9 +1004,11 @@ fmt.Printf("************ root **************\n%s", rootStr)
 //fmt.Printf("Obj ROOT with Obj id %d parsed successfully\n", id)
 
 	// Pages Obj
-	txtFil.WriteString("************ Pages **************\n")
 
 	id = pdf.pagesId -1
+	hdStr = fmt.Sprintf("************ Pages [Obj: %d] **************\n", id+1)
+	txtFil.WriteString(hdStr)
+
 	pagesStr :=string(buf[(pdfObjList[id].contSt+2):(pdfObjList[id].contEnd -2)]) + "\n"
 	txtFil.WriteString( "string: \n" + pagesStr + "***** end string\n")
 fmt.Printf("************ pages **********\n")
@@ -1010,10 +1031,9 @@ fmt.Println(pagesStr)
 	// Page
 	for pg:=0; pg<(pdf.pageCount ); pg++ {
 
-		outstr = fmt.Sprintf("************ Page %d **************\n", pg+1)
-		txtFil.WriteString(outstr)
-
 		id := pdf.pages[pg] -1
+		hdstr := fmt.Sprintf("************ Page %d [Obj: %d] **************\n", pg+1, id+1)
+		txtFil.WriteString(hdstr)
 
 		pageStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
 		txtFil.WriteString(pageStr)
@@ -1033,12 +1053,11 @@ fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr
 
 
 		// need to parse each Page
-//		outstr = fmt.Sprintf("************ Content Page %d **************\n", pg)
-//		txtFil.WriteString(outstr)
-
-//		id = 4
 		id = pagObj.contentId -1
-fmt.Printf("page %d: contentId: %d\n", pg, id)
+		hdstr = fmt.Sprintf("************ Content Page %d [Obj %d] **************\n", pg+1, id+1)
+		txtFil.WriteString(hdstr)
+
+//fmt.Printf("page %d: contentId: %d\n", pg, id)
 		contentStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
 
 		// seperate stream and kv pairs
@@ -1441,7 +1460,7 @@ func (pdf *InfoPdf) AnalysePdf(outfilnam string)(err error) {
 		outfil.WriteString(outstr)
 		return fmt.Errorf("error AnalysePdf:: cannot convert root string %s to object number in xref! %v", rootFlds[1], err)
 	}
-	outstr = fmt.Sprintf("Root: %d!\n", pdf.rootId)
+	outstr = fmt.Sprintf("Root: %d!\n", pdf.rootId +1)
 	outfil.WriteString(outstr)
 	// todo check obj rootFlds[1] is the catalog obj!
 	fmt.Println("Root: ",rootFlds[1])
