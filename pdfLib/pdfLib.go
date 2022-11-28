@@ -22,24 +22,34 @@ import (
 	"compress/zlib"
 )
 
+const (
+	letter =iota
+	landscape
+	A5
+	A4
+	A3
+	A2
+	A1
+)
+
 type InfoPdf struct {
 	fil *os.File
 	filSize int64
 	filNam string
 	sizeObj int
+	objSize int
 	numObj int
+	pageCount int
+	infoId int
+	rootId int
+	pagesId int
 	xref int
 	startxref int
 	trailer int
-	objSize int
-	objList *[]pdfObj
-	rootId int
-	infoId int
-	pagesId int
-	pageCount int
 	pageIds []int
-	page []pageObj
-
+	pages []pageObj
+	objList *[]pdfObj
+//	doc pdfDoc
 }
 
 type pdfObj struct {
@@ -54,6 +64,7 @@ type pdfObj struct {
 
 type pagesObj struct {
 	kids []int
+	defFont string
 }
 
 type pageObj struct {
@@ -66,6 +77,11 @@ type pageObj struct {
 }
 
 type fontObj struct {
+
+}
+
+type pdfDoc struct {
+	pageType int
 
 }
 
@@ -694,7 +710,7 @@ func (pdf *InfoPdf) parsePages(instr string)(err error) {
 	if err != nil {return fmt.Errorf("Pages: cannot convert Count value!")}
 
 	pdf.pageCount = count
-	pdf.pages = make([]int,pdf.pageCount)
+	pdf.pageIds = make([]int,pdf.pageCount)
 
 	//kids
 	val, ok = kvm["Kids"]
@@ -722,7 +738,7 @@ func (pdf *InfoPdf) parsePages(instr string)(err error) {
 				_, errPg := fmt.Sscanf(pgStr,"%d %d R",&pgId, &pgRev)
 				if errPg != nil {return fmt.Errorf("Pages: page %d str %s cannot be parsed: %v", pgCount, pgStr, errPg)}
 
-				pdf.pages[pgCount] = pgId
+				pdf.pageIds[pgCount] = pgId
 				pgSt = i+1
 				pgCount++
 				if (pgCount == count) {istate = 2}
@@ -1115,7 +1131,7 @@ fmt.Println(pagesStr)
 	// Page
 	for pg:=0; pg<(pdf.pageCount ); pg++ {
 
-		id := pdf.pages[pg] -1
+		id := pdf.pageIds[pg] -1
 		hdstr := fmt.Sprintf("************ Page %d [Obj: %d] **************\n", pg+1, id+1)
 		txtFil.WriteString(hdstr)
 
@@ -1159,6 +1175,71 @@ fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr
 	return nil
 
 }
+
+func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
+
+	var outstr string
+
+	txtFil, err := os.Create(txtfil)
+	if err != nil {return fmt.Errorf("error creating textFile %s: %v\n", txtfil, err);}
+	defer txtFil.Close()
+
+	buf := make([]byte,pdf.filSize)
+
+	_, err = (pdf.fil).Read(buf)
+	if err != nil {return fmt.Errorf("error Read: %v", err)}
+
+
+	//read top two lines
+	txtstr, nextPos, err := pdf.readLine(&buf, 0)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read top line: %v", err)
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+	outstr = txtstr + "\n"
+
+	txtstr, nextPos, err = pdf.readLine(&buf, nextPos)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read second top line: %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+	outstr += txtstr + "\n"
+
+	txtFil.WriteString(outstr)
+
+	// read last three lines
+	return nil
+}
+
+func (pdf *InfoPdf) readLine(inbuf *[]byte, stPos int)(outstr string, nextPos int, err error) {
+
+	buf := *inbuf
+//	bufLen := len(buf)
+
+fmt.Printf("\nreadLine (%d): %s\n", stPos, string(buf[stPos:stPos+20]))
+
+	fmt.Println("********")
+	endPos := -1
+
+	for i:=stPos; i < (stPos+20); i++ {
+//		fmt.Printf("i: %d char: %q\n",i, buf[i])
+		if buf[i] == '\n' {
+			endPos = i
+			nextPos = i+1
+			if buf[i-1] == '\r' {endPos = i-1}
+			break
+		}
+	}
+	if endPos == -1 {return "", -1, fmt.Errorf("no eol found!")}
+
+	outstr = string(buf[stPos:endPos])
+
+fmt.Printf("out: %s next: %d\n", outstr, nextPos)
+	return outstr, nextPos, nil
+}
+
 
 func (pdf *InfoPdf) GetPdfObjList(buf *[]byte)(objList *[]pdfObj, err error) {
 
