@@ -1251,7 +1251,9 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 		txtFil.WriteString(outstr + "error: " + errconvStr + "\n")
 		return fmt.Errorf(errconvStr)
 	}
-fmt.Printf("xref: %d\n", xref)
+	pdf.xref = xref
+
+//fmt.Printf("xref: %d\n", xref)
 
 	// last line
 	txtstr = string(buf[nextPos:])
@@ -1262,8 +1264,63 @@ fmt.Printf("xref: %d\n", xref)
 
 	txtFil.WriteString(outstr)
 
-	txtFil.WriteString("******** xref ***********\n")
+	txtFil.WriteString("******** trailer ***********\n")
 
+	outstr = ""
+	tStart := ltStart - 200
+	tByt := []byte("trailer")
+
+	tres := bytes.Index(buf[tStart:ltStart], tByt)
+	if tres < 0 {
+		txtstr = "cannot find \"trailer\"!"
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+	tStart += tres
+
+	txtstr, nextPos, err = pdf.readLine(&buf, tStart)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read line with \"trailer\": %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+	txtFil.WriteString(txtstr + "\n")
+
+	// trailer content
+	txtstr = string(buf[nextPos:ltStart])
+	txtFil.WriteString(txtstr)
+
+	txtFil.WriteString("******** xref ***********\n")
+	outstr = ""
+	xByt := []byte("xref")
+
+	xres := bytes.Index(buf[pdf.xref:pdf.xref+7], xByt)
+	if xres < 0 {
+		txtstr = "cannot find \"xref\"!"
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+//fmt.Printf("xres: %d\n", xres)
+
+	txtstr, nextPos, err = pdf.readLine(&buf, pdf.xref)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read line with \"xref\": %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+	txtFil.WriteString(txtstr + "\n")
+
+	// xref content
+	txtstr = string(buf[nextPos:tStart])
+
+	txtFil.WriteString(txtstr)
+
+
+	txtFil.WriteString("******** obj ***********\n")
 
 	return nil
 }
