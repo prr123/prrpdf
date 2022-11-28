@@ -1210,6 +1210,61 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	txtFil.WriteString(outstr)
 
 	// read last three lines
+
+	txtFil.WriteString("******** last three lines ***********\n")
+	bufLen := len(buf)
+	outstr = ""
+
+	ltStart := bufLen - 30
+	sByt := []byte("startxref")
+
+	ires := bytes.Index(buf[ltStart:], sByt)
+	if ires < 0 {
+		txtstr = "cannot find \"startxref\"!"
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+	ltStart += ires
+//	fmt.Printf("ires %d\n%s\n", ires, string(buf[ltStart:]))
+
+	txtstr, nextPos, err = pdf.readLine(&buf, ltStart)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read third last line: %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+	outstr += txtstr + "\n"
+
+	txtstr, nextPos, err = pdf.readLine(&buf, nextPos)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read second last line: %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+	outstr += txtstr + "\n"
+
+	xref := 0
+	_, err = fmt.Sscanf(txtstr, "%d", &xref)
+	if err != nil {
+		errconvStr := fmt.Sprintf("could not convert %s into xref: %v", txtstr, err)
+		txtFil.WriteString(outstr + "error: " + errconvStr + "\n")
+		return fmt.Errorf(errconvStr)
+	}
+fmt.Printf("xref: %d\n", xref)
+
+	// last line
+	txtstr = string(buf[nextPos:])
+
+	outstr += txtstr
+
+	if buf[bufLen-1] != '\n' {outstr += "\n"}
+
+	txtFil.WriteString(outstr)
+
+	txtFil.WriteString("******** xref ***********\n")
+
+
 	return nil
 }
 
@@ -1218,12 +1273,15 @@ func (pdf *InfoPdf) readLine(inbuf *[]byte, stPos int)(outstr string, nextPos in
 	buf := *inbuf
 //	bufLen := len(buf)
 
-fmt.Printf("\nreadLine (%d): %s\n", stPos, string(buf[stPos:stPos+20]))
+//fmt.Printf("\nreadLine (%d): %s\n", stPos, string(buf[stPos:stPos+20]))
 
-	fmt.Println("********")
+//fmt.Println("********")
 	endPos := -1
 
-	for i:=stPos; i < (stPos+20); i++ {
+	maxPos := stPos + 20
+	if len(buf) < maxPos {maxPos = len(buf)}
+
+	for i:=stPos; i < maxPos; i++ {
 //		fmt.Printf("i: %d char: %q\n",i, buf[i])
 		if buf[i] == '\n' {
 			endPos = i
@@ -1236,7 +1294,7 @@ fmt.Printf("\nreadLine (%d): %s\n", stPos, string(buf[stPos:stPos+20]))
 
 	outstr = string(buf[stPos:endPos])
 
-fmt.Printf("out: %s next: %d\n", outstr, nextPos)
+//fmt.Printf("out: %s next: %d\n", outstr, nextPos)
 	return outstr, nextPos, nil
 }
 
