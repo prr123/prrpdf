@@ -61,6 +61,8 @@ type pdfObj struct {
 	end int
 	contSt int
 	contEnd int
+	streamSt int
+	streamEnd int
 }
 
 type pagesObj struct {
@@ -1373,12 +1375,45 @@ func (pdf *InfoPdf) getObjStr(objId int)(outstr string, err error) {
 	if xres == -1 {
 		outstr = string(objByt)
 		outstr += "no stream\n"
-	} else {
-		outstr = string(buf[obj.start: (obj.start + xres)])
-		outstr += "has stream\n"
+		return outstr, nil
 	}
 
+	outstr = string(buf[obj.start: (obj.start + xres)])
+	outstr += "has stream\n"
+	obj.streamSt = obj.start + xres
+
+	seByt := []byte("endstream")
+	xres = bytes.Index(objByt, seByt)
+	if xres == -1 {
+		outstr += " cannot find \"endstream\"\n"
+		return outstr + "\n", fmt.Errorf(outstr)
+	}
+	obj.streamEnd = obj.start + xres
+
 	return outstr, nil
+}
+
+func (pdf *InfoPdf) PrintPdf() {
+
+	fmt.Printf("File Name: %s\n", pdf.filNam)
+	fmt.Printf("File Size: %d\n", pdf.filSize)
+
+	fmt.Printf("\nPage Count: %d\n", pdf.pageCount)
+
+	fmt.Printf("\nObjects: %d\n", pdf.sizeObj)
+	fmt.Printf("Info: %d\n", pdf.infoId)
+	fmt.Printf("Root: %d\n", pdf.rootId)
+	fmt.Printf("Pages: %d\n", pdf.pagesId)
+	fmt.Printf("Xref: %d\n", pdf.xref)
+	fmt.Printf("trailer: %d\n", pdf.trailer)
+	fmt.Printf("startxref: %d\n", pdf.startxref)
+
+
+	for i:= 0; i< len(*pdf.objList); i++ {
+		fmt.Printf("\nObject %d: %d\n",i, (*pdf.objList)[i].start)
+	}
+
+	return
 }
 
 func (pdf *InfoPdf) readLine(stPos int)(outstr string, nextPos int, err error) {
