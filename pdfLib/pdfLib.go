@@ -34,6 +34,7 @@ const (
 
 type InfoPdf struct {
 	fil *os.File
+	buf *[]byte
 	filSize int64
 	filNam string
 	sizeObj int
@@ -609,13 +610,15 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 	return kvmap, nil
 }
 
-func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, objstr string, err error) {
+func (pdf *InfoPdf) parseXref(inbuf *[]byte)(err error) {
 
 	var pdfobj pdfObj
+	var pdfObjList []pdfObj
+
+	pdf.objList = &pdfObjList
 
 	buf := *inbuf
 	endStr := ""
-	objStr := ""
 	linStr := ""
 	ist := pdf.xref + 5
 	istate := 0
@@ -628,6 +631,13 @@ func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, objstr string,
 
 	outstr :=""
 
+	if pdf.xref <1 { return fmt.Errorf("not a valid xref supplied!")}
+	if pdf.trailer <1 { return fmt.Errorf("not a valid trailer supplied!")}
+
+	// check xref
+
+
+	// replace with readLine ?
 	for i:= ist; i < pdf.trailer; i++ {
 		if buf[i] == '\n' {
 			linEnd:= i
@@ -642,23 +652,21 @@ func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, objstr string,
 		case 0:
 			_, err1 := fmt.Sscanf(linStr, "%d %d", &objId, &objNum)
 			if err1 != nil {
-				outstr += fmt.Sprintf("   //error parsing expected object heading [objid num] %s: %v\n", linStr, err)
-				return pdfObjList, outstr, fmt.Errorf("error parsing object heading %s: %v!", linStr, err)
+				outstr = fmt.Sprintf(" error parsing expected object heading [objid num] %s: %v", linStr, err)
+				return fmt.Errorf(outstr)
 			}
 			totObj += objNum
-			objStr += linStr + fmt.Sprintf("       // obj id %3d: number: %5d\n", objId, objNum)
 			istate = 1
 		case 1:
 			_, err = fmt.Sscanf(linStr, "%d %d %s", &objSt, &val2, &endStr)
 			if err != nil {
-				outstr += fmt.Sprintf("   //error parsing object %d: %v\n", objCount, err)
-				return pdfObjList, outstr, fmt.Errorf("error parsing object %d: %v!", objCount, err)
+				outstr = fmt.Sprintf("   //error parsing object %d: %v", objCount, err)
+				return fmt.Errorf(outstr)
 			}
 			if objCount > objNum {
-				outstr += fmt.Sprintf("   //error too many obj ref %d: %v\n", objCount, err)
-				return pdfObjList, outstr, fmt.Errorf("error parsing object %d: %v!", objCount, err)
+				outstr = fmt.Sprintf("   //error too many obj ref %d: %v", objCount, err)
+				return fmt.Errorf(outstr)
 			}
-			objStr += linStr + fmt.Sprintf(" // obj id %3d: start: %5d valid: %s\n", objId + objCount, objSt, endStr)
 
 			pdfobj.objId = objId + objCount
 			pdfobj.start = objSt
@@ -683,7 +691,7 @@ func (pdf *InfoPdf) parseXref(inbuf *[]byte)(pdfObjList []pdfObj, objstr string,
 		pdfObjList[i].end = objEnd
 	}
 
-	return pdfObjList, objStr, nil
+	return nil
 }
 
 func (pdf *InfoPdf) parsePages(instr string)(err error) {
@@ -990,16 +998,17 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 	pdf.xref = xref
 
-	pdfObjList, objStr, err := pdf.parseXref(&buf)
+//	pdfObjList, err := pdf.parseXref(&buf)
 
 	outstr = xrefStr
-	outstr += objStr
+//	outstr += objStr
 	outstr += pEndStr
 	txtFil.WriteString(outstr)
 
 	// sort
 
 	txtFil.WriteString("**************************\n")
+	pdfObjList := *(pdf.objList)
 	pdfObjStr := ""
 	for j:=0; j<len(pdfObjList); j++ {
 		pdfObjStr += fmt.Sprintf("Obj Id: %4d Start: %5d End: %5d\n", pdfObjList[j].objId, pdfObjList[j].start, pdfObjList[j].end)
@@ -1189,9 +1198,10 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	_, err = (pdf.fil).Read(buf)
 	if err != nil {return fmt.Errorf("error Read: %v", err)}
 
+	pdf.buf = &buf
 
 	//read top two lines
-	txtstr, nextPos, err := pdf.readLine(&buf, 0)
+	txtstr, nextPos, err := pdf.readLine(0)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read top line: %v", err)
 		txtFil.WriteString(txtstr + "\n")
@@ -1199,7 +1209,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	}
 	outstr = txtstr + "\n"
 
-	txtstr, nextPos, err = pdf.readLine(&buf, nextPos)
+	txtstr, nextPos, err = pdf.readLine(nextPos)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read second top line: %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
@@ -1228,7 +1238,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	ltStart += ires
 //	fmt.Printf("ires %d\n%s\n", ires, string(buf[ltStart:]))
 
-	txtstr, nextPos, err = pdf.readLine(&buf, ltStart)
+	txtstr, nextPos, err = pdf.readLine(ltStart)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read third last line: %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
@@ -1236,7 +1246,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	}
 	outstr += txtstr + "\n"
 
-	txtstr, nextPos, err = pdf.readLine(&buf, nextPos)
+	txtstr, nextPos, err = pdf.readLine(nextPos)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read second last line: %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
@@ -1278,8 +1288,9 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	}
 
 	tStart += tres
+	pdf.trailer = tStart
 
-	txtstr, nextPos, err = pdf.readLine(&buf, tStart)
+	txtstr, nextPos, err = pdf.readLine(tStart)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read line with \"trailer\": %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
@@ -1305,7 +1316,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 
 //fmt.Printf("xres: %d\n", xres)
 
-	txtstr, nextPos, err = pdf.readLine(&buf, pdf.xref)
+	txtstr, nextPos, err = pdf.readLine(pdf.xref)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read line with \"xref\": %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
@@ -1319,15 +1330,60 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 
 	txtFil.WriteString(txtstr)
 
+	// parse  Xref
+	err = pdf.parseXref(&buf)
+	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
-	txtFil.WriteString("******** obj ***********\n")
+	txtFil.WriteString("******** obj list ***********\n")
+
+	// list objs
+	objList := *pdf.objList
+	for i:=0; i< len(objList); i++ {
+		outstr = fmt.Sprintf("obj [%3d]: start %5d end %5d\n", i, objList[i].start, objList[i].end)
+		txtFil.WriteString(outstr)
+	}
+
+	//list each object
+	for i:=0; i< len(objList); i++ {
+		outstr = fmt.Sprintf("******** Obj %d ***********\n", i)
+		txtFil.WriteString(outstr)
+
+		objstr, err := pdf.getObjStr(i)
+		if err != nil {
+			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
+			txtFil.WriteString(txtstr + "\n")
+			return fmt.Errorf(txtstr)
+		}
+		txtFil.WriteString(objstr)
+	}
 
 	return nil
 }
 
-func (pdf *InfoPdf) readLine(inbuf *[]byte, stPos int)(outstr string, nextPos int, err error) {
+func (pdf *InfoPdf) getObjStr(objId int)(outstr string, err error) {
 
-	buf := *inbuf
+	obj := (*pdf.objList)[objId]
+	buf := *pdf.buf
+
+	//getstream
+	sByt := []byte("stream")
+	objByt := buf[obj.start:obj.end]
+
+	xres := bytes.Index(objByt, sByt)
+	if xres == -1 {
+		outstr = string(objByt)
+		outstr += "no stream\n"
+	} else {
+		outstr = string(buf[obj.start: (obj.start + xres)])
+		outstr += "has stream\n"
+	}
+
+	return outstr, nil
+}
+
+func (pdf *InfoPdf) readLine(stPos int)(outstr string, nextPos int, err error) {
+
+	buf := *pdf.buf
 //	bufLen := len(buf)
 
 //fmt.Printf("\nreadLine (%d): %s\n", stPos, string(buf[stPos:stPos+20]))
