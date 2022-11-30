@@ -358,6 +358,7 @@ func (pdf *InfoPdf) parseObjRef(key string, Start int, End int)(objId int, err e
 	buf := *pdf.buf
 	keyByt := []byte("/" + key)
 	rootSt:=0
+//fmt.Printf("str [%d:%d]: %s\n", Start, End, string(buf[Start:End]))
 	for i:=Start; i< End; i++ {
 		ires := bytes.Index(buf[Start: End], keyByt)
 		if ires > 0 {
@@ -568,8 +569,9 @@ fmt.Printf("stream len %d\n", len(outstr))
 	return outstr, nil
 }
 
+
 // parseRoot parses ROOT object and returns a map of the object properties
-func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) {
+func (pdf *InfoPdf) parseRootOld(instr string)(kvmap map[string]string, err error) {
 
 	kvmap, err = pdf.getKvMap(instr)
 	if err != nil {return kvmap, fmt.Errorf("parseRoot: cannot get kv pairs: %v", err)}
@@ -1083,7 +1085,7 @@ fmt.Printf("info:\n%s", infoStr)
 	txtFil.WriteString(rootStr)
 fmt.Printf("************ root **************\n%s", rootStr)
 
-	kvmap, err := pdf.parseRoot(rootStr)
+	kvmap, err := pdf.parseRootOld(rootStr)
 	if err != nil {
 		outstr = fmt.Sprintf("// error parsing Root: %v\n", err)
 		txtFil.WriteString(outstr)
@@ -1352,8 +1354,28 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 		txtFil.WriteString(objstr)
 	}
 
+	// create pdf dom tree
+	err = pdf.parseRoot()
+	if err != nil {return fmt.Errorf("parseRoot: %v", err)}
+
 	return nil
 }
+
+//aa
+func (pdf *InfoPdf) parseRoot()(err error) {
+
+	if pdf.rootId > pdf.numObj {return fmt.Errorf("invalid rootId!")}
+
+	obj := (*pdf.objList)[pdf.rootId -1]
+
+	objId, err := pdf.parseObjRef("Pages",obj.contSt, obj.contEnd)
+	if err != nil {return fmt.Errorf("Root obj: parse \"Pages\" error: %v!", err)}
+
+	pdf.pagesId = objId
+
+	return nil
+}
+
 
 func (pdf *InfoPdf) parseObjStr(objId int)(outstr string, err error) {
 
