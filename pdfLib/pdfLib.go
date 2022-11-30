@@ -1343,7 +1343,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 		outstr = fmt.Sprintf("******** Obj %d ***********\n", i)
 		txtFil.WriteString(outstr)
 
-		objstr, err := pdf.getObjStr(i)
+		objstr, err := pdf.parseObjStr(i)
 		if err != nil {
 			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
 			txtFil.WriteString(txtstr + "\n")
@@ -1355,25 +1355,69 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	return nil
 }
 
-func (pdf *InfoPdf) getObjStr(objId int)(outstr string, err error) {
+func (pdf *InfoPdf) parseObjStr(objId int)(outstr string, err error) {
 
 	obj := (*pdf.objList)[objId]
 	buf := *pdf.buf
 
-	//getstream
-	sByt := []byte("stream")
+	brByt := []byte("obj")
 	objByt := buf[obj.start:obj.end]
 
-	xres := bytes.Index(objByt, sByt)
+	xres := bytes.Index(objByt, brByt)
+	if xres == -1 {
+		outstr += "no keyword \"obj\""
+		return outstr + "\n", fmt.Errorf(outstr)
+	}
+
+	obj.contSt = obj.start + xres + 4
+	if buf[obj.contSt] == '\n' {obj.contSt++}
+
+	brByt = []byte("endobj")
+	xres = bytes.Index(objByt, brByt)
+	if xres == -1 {
+		outstr += "no keyword \"endobj\""
+		return outstr + "\n", fmt.Errorf(outstr)
+	}
+
+	obj.contEnd = obj.start + xres
+	if buf[obj.contSt] == '\n' {obj.contSt++}
+
+
+	brByt = []byte("<<")
+
+	xres = bytes.Index(objByt, brByt)
+
+	if xres == -1 {
+		outstr = "no open brackets"
+	} else {
+		obj.contSt = obj.start + xres + 2
+	}
+
+	if xres>0 {
+		brByt = []byte(">>")
+
+		xres = bytes.LastIndex(objByt, brByt)
+		if xres == -1 {
+			outstr += "no closing brackets"
+			return outstr + "\n", fmt.Errorf(outstr)
+		}
+		obj.contEnd = obj.start + xres
+	}
+	(*pdf.objList)[objId] = obj
+
+	//getstream
+	sByt := []byte("stream")
+
+	xres = bytes.Index(objByt, sByt)
 	if xres == -1 {
 		outstr = string(objByt)
-		outstr += "no stream\n"
-		return outstr, nil
+		outstr += "no keyword stream"
+		return outstr + "\n", nil
 	}
 
 	outstr = string(buf[obj.start: (obj.start + xres)])
 	outstr += "has stream\n"
-	obj.streamSt = obj.start + xres
+	obj.streamSt = obj.start + xres + 6
 
 	seByt := []byte("endstream")
 	xres = bytes.Index(objByt, seByt)
@@ -1382,6 +1426,8 @@ func (pdf *InfoPdf) getObjStr(objId int)(outstr string, err error) {
 		return outstr + "\n", fmt.Errorf(outstr)
 	}
 	obj.streamEnd = obj.start + xres
+
+	(*pdf.objList)[objId] = obj
 
 	return outstr, nil
 }
