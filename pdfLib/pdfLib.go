@@ -1238,6 +1238,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	}
 
 	ltStart += ires
+	pdf.startxref = ltStart
 //	fmt.Printf("ires %d\n%s\n", ires, string(buf[ltStart:]))
 
 	txtstr, nextPos, err = pdf.readLine(ltStart)
@@ -1397,21 +1398,27 @@ func (pdf *InfoPdf) PrintPdf() {
 
 	fmt.Printf("File Name: %s\n", pdf.filNam)
 	fmt.Printf("File Size: %d\n", pdf.filSize)
+	fmt.Println()
 
-	fmt.Printf("\nPage Count: %d\n", pdf.pageCount)
+	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
+	fmt.Println()
+	fmt.Printf("Objects:    %5d\n", pdf.sizeObj)
+	fmt.Printf("Info:       %5d\n", pdf.infoId)
+	fmt.Printf("Root:       %5d\n", pdf.rootId)
+	fmt.Printf("Pages:      %5d\n", pdf.pagesId)
+	fmt.Printf("Xref:       %5d\n", pdf.xref)
+	fmt.Printf("trailer:    %5d\n", pdf.trailer)
+	fmt.Printf("startxref:  %5d\n", pdf.startxref)
 
-	fmt.Printf("\nObjects: %d\n", pdf.sizeObj)
-	fmt.Printf("Info: %d\n", pdf.infoId)
-	fmt.Printf("Root: %d\n", pdf.rootId)
-	fmt.Printf("Pages: %d\n", pdf.pagesId)
-	fmt.Printf("Xref: %d\n", pdf.xref)
-	fmt.Printf("trailer: %d\n", pdf.trailer)
-	fmt.Printf("startxref: %d\n", pdf.startxref)
-
-
+	fmt.Println("********************************")
+	fmt.Println("                       Content      Stream")
+	fmt.Println("Obj   Id start  end   Start  End  Start  End  Length")
 	for i:= 0; i< len(*pdf.objList); i++ {
-		fmt.Printf("\nObject %d: %d\n",i, (*pdf.objList)[i].start)
+		obj := (*pdf.objList)[i]
+		fmt.Printf("%3d: %3d %5d %5d %5d %5d %5d %5d %5d\n",
+		i, obj.objId, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt)
 	}
+	fmt.Println("********************************")
 
 	return
 }
