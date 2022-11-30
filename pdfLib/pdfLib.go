@@ -303,9 +303,12 @@ func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
 	return outstr, nil
 }
 
-func (pdf *InfoPdf) parseTrailer(inbuf *[]byte)(outstr string, err error) {
+func (pdf *InfoPdf) parseTrailer()(err error) {
 
-	buf := *inbuf
+	if pdf.startxref < 1 {return fmt.Errorf("no valid startxref")}
+	if pdf.trailer < 1 {return fmt.Errorf("no valid trailer")}
+
+	buf := *pdf.buf
 	trailEnd := 0
 	for i:=pdf.startxref; i> pdf.startxref-10; i-- {
 		if buf[i] == '>' {
@@ -317,91 +320,71 @@ func (pdf *InfoPdf) parseTrailer(inbuf *[]byte)(outstr string, err error) {
 	}
 
 	if trailEnd == 0 {
-		outstr = "// cannot find closing angular brackets for trailer!\n"
-		return outstr, fmt.Errorf("cannot find closing angular bracket for trailer!")
+		return fmt.Errorf("cannot find closing angular bracket for trailer!")
 	}
 
 	trailStart := 0
-	for i:=trailEnd; i> 0; i-- {
+	for i:=pdf.trailer + 7; i< trailEnd; i++ {
 		if buf[i] == '<' {
-			if buf[i-1] == '<' {
-				trailStart = i+1
+			if buf[i+1] == '<' {
+				trailStart = i+2
 				break
 			}
 		}
 	}
 
 	if trailStart == 0 {
-		outstr = "// cannot find opening angular brackets for trailer!\n"
-		return outstr, fmt.Errorf("cannot find opening angular bracket for trailer!")
+		outstr := "// cannot find opening angular brackets for trailer!"
+		return fmt.Errorf(outstr)
 	}
 
-	trailer_start :=0
-	trailer_end :=0
+	fmt.Printf("trailer: %s\n", string(buf[trailStart:trailEnd]))
 
-	for i:=trailStart -1 ; i>trailStart - 21; i-- {
-		if buf[i] == '\n' {
-			trailer_end = i
+	objId, err := pdf.parseObjRef("Root",trailStart, trailEnd)
+	if err != nil {return fmt.Errorf("trailer parse Obj error: %v!", err)}
+	pdf.rootId = objId
+//fmt.Printf("Root: %d\n", objId)
+
+	objId, err = pdf.parseObjRef("Info",trailStart, trailEnd)
+	if err != nil {return fmt.Errorf("trailer parse Obj error: %v!", err)}
+	pdf.infoId = objId
+
+	return nil
+}
+
+func (pdf *InfoPdf) parseObjRef(key string, Start int, End int)(objId int, err error) {
+
+	//find key
+	buf := *pdf.buf
+	keyByt := []byte("/" + key)
+	rootSt:=0
+	for i:=Start; i< End; i++ {
+		ires := bytes.Index(buf[Start: End], keyByt)
+		if ires > 0 {
+			rootSt = Start + ires
 			break
 		}
 	}
+	if rootSt == 0 {return -1, fmt.Errorf("cannot find keyword %s", key)}
 
-	if trailer_end == 0 {
-		outstr = "// cannot find end of line with keyword \"trailer\"!\n"
-		return outstr, fmt.Errorf("cannot find end of line with keyword \"trailer\"!")
-	}
-
-	if buf[trailer_end -1] == '\r' {trailer_end--}
-	// find beginning of line with key word trailer
-	for i:=trailer_end -1 ; i>trailer_end - 21; i-- {
-		if buf[i] == '\n' {
-			trailer_start = i+1
+	rootEnd :=0
+	for i:=rootSt+4; i< End; i++ {
+		if buf[i] == 'R' {
+			rootEnd = i +1
 			break
 		}
 	}
-	if trailer_start ==0 {
-		outstr = "// cannot find beginning of line with keyword \"trailer\"!\n"
-		return outstr, fmt.Errorf("cannot find beginning of line with keyword \"trailer\"!")
-	}
+	if rootEnd == 0 {return -1, fmt.Errorf("cannot find obj after keyword %s!", key)}
 
-//fmt.Printf("trailer start: %d end: %d\n", trailer_start, trailer_end)
-	trailerStr := string(buf[trailer_start:trailer_end])
-//fmt.Printf("trailer line: %s\n", trailerStr)
-	if trailerStr != "trailer" {
-		outstr = fmt.Sprintf("// no keyword \"trailer\" found in %s!\n", trailerStr)
-		return outstr, fmt.Errorf("no keyword \"trailer\" found in %s!", trailerStr)
-	}
+	keyObjStr := string(buf[(rootSt + len(key) +1):rootEnd])
 
-	pdf.trailer = trailer_start
-//	trailStart--
-//	trailEnd++
-//	trailContentStr := string(buf[trailStart:trailEnd]) + "\n"
-	outstr = trailerStr + "     // correct trailer header \n"
+fmt.Printf("%s: %s\n", key, keyObjStr)
 
-	// parseTrailContentStr
+	val :=0
+	_, err = fmt.Sscanf( keyObjStr, " %d %d R", &objId, &val)
+	if err != nil {return -1, fmt.Errorf("cannot parse obj after keyword %s! %v", key, err)}
 
-	trailCont := string(buf[trailStart:trailEnd+1]) + "\n"
-	tConCount:=0
-	linStr := ""
-	ist := 0
-	for i:=ist; i< len(trailCont); i++ {
-		if trailCont[i] == '\n' {
-			linEnd := i
-			if trailCont[i-1] == '\r' { linEnd--}
-			linStr = string(trailCont[ist:linEnd])
-			trailStr, err := pdf.parseTrailCont(linStr)
-			if err != nil {
-				outstr += trailStr
-				return outstr, fmt.Errorf("could not parse trailer Content: %v", err)
-			}
-			ist = i+1
-//fmt.Printf("trail line %d: %s\n", tConCount, linStr)
-			tConCount++
-			outstr += trailStr
-		}
-	}
-
-	return outstr, nil
+	return objId, nil
 }
 
 func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
@@ -612,14 +595,16 @@ func (pdf *InfoPdf) parseRoot(instr string)(kvmap map[string]string, err error) 
 	return kvmap, nil
 }
 
-func (pdf *InfoPdf) parseXref(inbuf *[]byte)(err error) {
+func (pdf *InfoPdf) parseXref()(err error) {
 
 	var pdfobj pdfObj
 	var pdfObjList []pdfObj
 
+	buf := *pdf.buf
+
 	pdf.objList = &pdfObjList
 
-	buf := *inbuf
+
 	endStr := ""
 	linStr := ""
 	ist := pdf.xref + 5
@@ -969,8 +954,8 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 	// find trailer
 
-	trailerStr , err := pdf.parseTrailer(&buf)
-	trailerStr = "**** trailer ****\n" + trailerStr
+	err = pdf.parseTrailer()
+	trailerStr := "**** trailer ****\n"
 	if err != nil {
 		txtFil.WriteString(trailerStr + pEndStr)
 		return fmt.Errorf("parseLast3Lines: %v",err)
@@ -1000,7 +985,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
 	pdf.xref = xref
 
-//	pdfObjList, err := pdf.parseXref(&buf)
+//	pdfObjList, err := pdf.parseXref()
 
 	outstr = xrefStr
 //	outstr += objStr
@@ -1302,6 +1287,13 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 
 	txtFil.WriteString(txtstr + "\n")
 
+	err = pdf.parseTrailer()
+	if err != nil {
+		txtstr = fmt.Sprintf("parse error \"trailer\": %v", err)
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
 	// trailer content
 	txtstr = string(buf[nextPos:ltStart])
 	txtFil.WriteString(txtstr)
@@ -1334,7 +1326,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	txtFil.WriteString(txtstr)
 
 	// parse  Xref
-	err = pdf.parseXref(&buf)
+	err = pdf.parseXref()
 	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
 	txtFil.WriteString("******** obj list ***********\n")
@@ -1402,7 +1394,7 @@ func (pdf *InfoPdf) PrintPdf() {
 
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
 	fmt.Println()
-	fmt.Printf("Objects:    %5d\n", pdf.sizeObj)
+	fmt.Printf("Objects:    %5d\n", pdf.numObj)
 	fmt.Printf("Info:       %5d\n", pdf.infoId)
 	fmt.Printf("Root:       %5d\n", pdf.rootId)
 	fmt.Printf("Pages:      %5d\n", pdf.pagesId)
