@@ -683,7 +683,7 @@ func (pdf *InfoPdf) parseXref()(err error) {
 	return nil
 }
 
-func (pdf *InfoPdf) parsePages(instr string)(err error) {
+func (pdf *InfoPdf) parsePagesOld(instr string)(err error) {
 
 //fmt.Printf("\n*****\nparsePages:\n%s\n***\n", instr)
 
@@ -1111,7 +1111,7 @@ fmt.Printf("************ root **************\n%s", rootStr)
 	txtFil.WriteString( "string: \n" + pagesStr + "***** end string\n")
 fmt.Printf("************ pages **********\n")
 fmt.Println(pagesStr)
-	err = pdf.parsePages(pagesStr)
+	err = pdf.parsePagesOld(pagesStr)
 	if err != nil {
 		outstr = fmt.Sprintf("// error parsing Pages: %v\n", err)
 		txtFil.WriteString(outstr)
@@ -1345,7 +1345,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 		outstr = fmt.Sprintf("******** Obj %d ***********\n", i)
 		txtFil.WriteString(outstr)
 
-		objstr, err := pdf.parseObjStr(i)
+		objstr, err := pdf.decodeObjStr(i)
 		if err != nil {
 			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
 			txtFil.WriteString(txtstr + "\n")
@@ -1357,6 +1357,11 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 	// create pdf dom tree
 	err = pdf.parseRoot()
 	if err != nil {return fmt.Errorf("parseRoot: %v", err)}
+	txtFil.WriteString("parsed \"Root\" successfully!\n")
+
+	err = pdf.parsePages()
+	if err != nil {return fmt.Errorf("parsePages: %v", err)}
+	txtFil.WriteString("parsed \"Pages\" successfully!\n")
 
 	return nil
 }
@@ -1365,6 +1370,7 @@ func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
 func (pdf *InfoPdf) parseRoot()(err error) {
 
 	if pdf.rootId > pdf.numObj {return fmt.Errorf("invalid rootId!")}
+	if pdf.rootId ==0 {return fmt.Errorf("rootId is 0!")}
 
 	obj := (*pdf.objList)[pdf.rootId -1]
 
@@ -1376,8 +1382,87 @@ func (pdf *InfoPdf) parseRoot()(err error) {
 	return nil
 }
 
+func (pdf *InfoPdf) parsePages()(err error) {
 
-func (pdf *InfoPdf) parseObjStr(objId int)(outstr string, err error) {
+	if pdf.pagesId > pdf.numObj {return fmt.Errorf("invalid pagesId!")}
+	if pdf.pagesId ==0 {return fmt.Errorf("pagesId is 0!")}
+
+	obj := (*pdf.objList)[pdf.pagesId -1]
+
+	st := pdf.findKeyWord("Kids", obj)
+	if st == -1 {
+		outstr := "no keyword \"Kids\""
+		return fmt.Errorf(outstr)
+	}
+	st = obj.contSt + st + 5
+
+
+fmt.Printf("kids St: %d %d %s\n", st, obj.contEnd, string((*pdf.buf)[st: st+25]))
+
+	endPos := pdf.findVal(st, obj.contEnd)
+
+fmt.Printf("kids end %d: %d \n", st, st + endPos)
+
+	valstr := string((*pdf.buf)[st:st+endPos])
+fmt.Println("val str: ", valstr)
+//	err = parseKids
+
+	st = pdf.findKeyWord("MediaBox", obj)
+	if st == -1 {
+		outstr := "no keyword \"MediaBox\""
+		return fmt.Errorf(outstr)
+	}
+fmt.Printf("Media Box St: %d\n", st)
+
+	st = pdf.findKeyWord("Count", obj)
+	if st == -1 {
+		outstr := "no keyword \"Count\""
+		return fmt.Errorf(outstr)
+	}
+fmt.Printf("Count St: %d\n", st)
+
+	st = pdf.findKeyWord("Resources", obj)
+	if st == -1 {
+	}
+
+fmt.Printf("Resources: %d\n", st)
+
+	return nil
+}
+
+//aa
+func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
+
+	buf:= *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("find key: %s in %s\n", key, string(objByt))
+
+	keyByt := []byte("/" + key)
+	ipos = bytes.Index(objByt, keyByt)
+
+	return ipos
+}
+
+func (pdf *InfoPdf) findVal(start, end int)(ipos int) {
+
+	ipos = end
+	buf:= *pdf.buf
+	objByt := buf[start:end]
+
+fmt.Printf("find val:%s \n", string(objByt))
+
+	for i:=0; i< len(objByt); i++ {
+		if objByt[i] == '/' {
+			ipos = i
+			break
+		}
+	}
+fmt.Printf("find val end pos:%d \n", ipos)
+
+	return ipos
+}
+
+func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 	obj := (*pdf.objList)[objId]
 	buf := *pdf.buf
