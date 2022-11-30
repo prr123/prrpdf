@@ -338,7 +338,7 @@ func (pdf *InfoPdf) parseTrailer()(err error) {
 		return fmt.Errorf(outstr)
 	}
 
-	fmt.Printf("trailer: %s\n", string(buf[trailStart:trailEnd]))
+//	fmt.Printf("trailer: %s\n", string(buf[trailStart:trailEnd]))
 
 	objId, err := pdf.parseObjRef("Root",trailStart, trailEnd)
 	if err != nil {return fmt.Errorf("trailer parse Obj error: %v!", err)}
@@ -378,7 +378,7 @@ func (pdf *InfoPdf) parseObjRef(key string, Start int, End int)(objId int, err e
 
 	keyObjStr := string(buf[(rootSt + len(key) +1):rootEnd])
 
-fmt.Printf("%s: %s\n", key, keyObjStr)
+//fmt.Printf("%s: %s\n", key, keyObjStr)
 
 	val :=0
 	_, err = fmt.Sscanf( keyObjStr, " %d %d R", &objId, &val)
