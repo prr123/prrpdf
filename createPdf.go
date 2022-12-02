@@ -30,17 +30,23 @@ func main() {
 	pos := strings.Index(createFilnam, ".pdf")
    	if pos == -1 {fmt.Printf("error createFilnam has no pdf extension!\n"); os.Exit(-1);}
 
+	idx := strings.Index(createFilnam, "/")
+	if idx == -1 {createFilnam = "test/" + createFilnam; pos += 6}
+
+
 	flags := [] string {"out", "dbg"}
 
 	argmap, err := util.ParseFlagsStart(os.Args, flags,2)
 	if err != nil {fmt.Printf("error ParseFlags: %v\n", err); os.Exit(-1);}
 
+	outFilNamStr := "none"
 	outFilNam, ok := argmap["out"]
 	if !ok {
-//		outFilNam = parseFilnam[0:(pos+1)] + "pdfdat"
+		outFilNamStr = string(createFilnam[:pos]) + "pdfdat"
+	} else {
+		outFilNamStr = outFilNam.(string)
 	}
 
-	outFilNamStr := outFilNam.(string)
 fmt.Printf("out file: %s\n",outFilNamStr)
 
 	pdf := pdflib.Init()
