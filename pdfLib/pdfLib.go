@@ -1,15 +1,13 @@
-// library to analyse pdf documents
+// library to create analyse pdf documents
 // author: prr
-// created: 18/2/2022
-//
-// 21/2/2022
-// added zlib
+// created: 2/12/2022
 //
 // library pdf files in go
 // author: prr
-// date 29/2/2022
+// date 2/12/2022
 // copyright 2022 prr azul software
 //
+
 package pdflib
 
 import (
@@ -20,6 +18,7 @@ import (
 	"bytes"
 	"io"
 	"compress/zlib"
+	util "prrpdf/utilLib"
 )
 
 const (
@@ -48,8 +47,9 @@ type InfoPdf struct {
 	startxref int
 	trailer int
 	pageIds []int
-	pages []pageObj
+	pageList []pageObj
 	objList *[]pdfObj
+	pages *pagesObj
 //	doc pdfDoc
 }
 
@@ -67,7 +67,8 @@ type pdfObj struct {
 
 type pagesObj struct {
 	kids []int
-	defFont string
+	Font string
+	mediaBox [4]int
 }
 
 type pageObj struct {
@@ -1121,7 +1122,7 @@ fmt.Println(pagesStr)
 	outstr = fmt.Sprintf("Pages // Pages parsed successfully\n")
 	outstr += fmt.Sprintf("page count: %d\n", pdf.pageCount)
 	for i:=0; i< pdf.pageCount; i++ {
-		outstr += fmt.Sprintf("page %d: id: %d\n",i+1 ,pdf.pages[i])
+		outstr += fmt.Sprintf("page %d: id: %d\n",i+1 ,pdf.pageList[i])
 	}
 	txtFil.WriteString(outstr)
 
@@ -1638,4 +1639,169 @@ func getObjTypStr(ityp int)(s string) {
 	return s
 }
 
+
+func (pdf *InfoPdf) CreatePdfObj(pgNum int)(err error) {
+
+
+
+
+//	pdf.objList = &pdfObjList
+	return nil
+}
+
+func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
+
+	var outstr string
+	var pdfobj pdfObj
+	var pdfObjList []pdfObj
+
+
+	err = util.CheckFilnam(pdfFilnam, ".pdf")
+	if err != nil {return fmt.Errorf("no pdf extension %s: %v\n", pdfFilnam, err);}
+
+	pdfFil, err := os.Create(pdfFilnam)
+	if err != nil {return fmt.Errorf("could not create pdf File %s: %v\n", pdfFilnam, err);}
+	defer pdfFil.Close()
+
+	// write top two lines
+	tl := []byte("%pdf-1.4\n")
+	sl := []byte{37,130, 131, 132, 10}
+
+	bytSl := append(tl, sl...)
+	pdfFil.Write(bytSl)
+
+//	objSt := len(bytSl)
+
+
+	// write objects
+
+	var objSl []byte
+
+	// info
+	objStart, err := pdfFil.Seek(0, os.SEEK_END)
+	if err != nil {return fmt.Errorf("seek %v", err)}
+	objSt := int(objStart) + 1
+	objBegin := int(objStart)
+	objEnd := -1
+
+	objLin := []byte("1 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Title (test)\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/Producer (azulPdf)>>\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+//fmt.Printf("info: %d %d\n", objSt, objEnd)
+
+	pdfobj.objId = 1
+	pdfobj.start = objSt
+	pdfobj.end = objEnd
+	pdfObjList = append(pdfObjList, pdfobj)
+	pdf.numObj++
+	pdf.infoId = 1
+
+	// root
+	objSt = objEnd + 1
+	objEnd = -1
+
+	objLin = []byte("2 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /Catalog\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/Pages 3 0 R>>\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+//	pdfFil.Write(objSl)
+	objEnd = objBegin + len(objSl)
+//fmt.Printf("root: %d %d\n", objSt, objEnd)
+
+	pdfobj.objId = 2
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+	pdf.numObj++
+	pdf.rootId = 2
+
+	// pages
+	objSt = objEnd + 1
+	objEnd = -1
+
+	objLin = []byte("3 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /Pages\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/Kids [4 0 R]\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/Count 1>>\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.objId = 3
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+	pdf.numObj++
+	pdf.pagesId = 3
+
+	pdfFil.Write(objSl)
+
+	// write xref
+	xref, err := pdfFil.Seek(0, os.SEEK_END)
+	if err != nil {return fmt.Errorf("xref pos %v", err)}
+	pdf.xref = int(xref)
+
+	pdfFil.WriteString("xref\n")
+	outstr = fmt.Sprintf("0 %d\n", pdf.numObj + 1)
+	pdfFil.WriteString(outstr)
+	outstr = fmt.Sprintf("0000000000 65535 f \n")
+	pdfFil.WriteString(outstr)
+
+	objSl = []byte{}
+	for i:=0; i<len(pdfObjList); i++ {
+		objLin = []byte("0000000000 00000 n \n")
+		str := fmt.Sprintf("%d",pdfObjList[i].start)
+//fmt.Printf("obj %d: %s\n", i, str)
+		pos := 10 -len(str)
+		for j:=0; j<len(str); j++ {
+			objLin[pos] = str[j]
+			pos++
+		}
+
+		objSl = append(objSl, objLin...)
+	}
+	pdfFil.Write(objSl)
+
+	// write trailer
+	pdfFil.WriteString("trailer\n")
+	outstr = fmt.Sprintf("<</Size %d\n", pdf.numObj)
+	pdfFil.WriteString(outstr)
+	outstr = fmt.Sprintf("/Root %d 0 R\n", pdf.rootId)
+	pdfFil.WriteString(outstr)
+	outstr = fmt.Sprintf("/Info %d 0 R>>\n", pdf.infoId)
+	pdfFil.WriteString(outstr)
+
+	// write last three lines
+	pdfFil.WriteString("startxref\n")
+	outstr = fmt.Sprintf("%d\n", pdf.xref)
+	pdfFil.WriteString(outstr)
+	outstr = "%%EOF"
+	pdfFil.WriteString(outstr)
+	return nil
+}
 
