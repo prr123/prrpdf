@@ -1684,7 +1684,9 @@ func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
 	objBegin := int(objStart)
 	objEnd := -1
 
-	objLin := []byte("1 0 obj\n")
+	pdf.numObj++
+	objStr := fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin := []byte(objStr)
 	objSl = append(objSl, objLin...)
 
 	objLin = []byte("<</Title (test)\n")
@@ -1698,23 +1700,30 @@ func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
 	objEnd = objBegin + len(objSl)
 //fmt.Printf("info: %d %d\n", objSt, objEnd)
 
-	pdfobj.objId = 1
+	pdfobj.objId = pdf.numObj
 	pdfobj.start = objSt
 	pdfobj.end = objEnd
 	pdfObjList = append(pdfObjList, pdfobj)
-	pdf.numObj++
-	pdf.infoId = 1
+	pdf.infoId = pdf.numObj
 
 	// root
 	objSt = objEnd + 1
 	objEnd = -1
 
-	objLin = []byte("2 0 obj\n")
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	pdf.rootId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+
 	objSl = append(objSl, objLin...)
 
 	objLin = []byte("<</Type /Catalog\n")
 	objSl = append(objSl, objLin...)
-	objLin = []byte("/Pages 3 0 R>>\n")
+
+	objStr = fmt.Sprintf("/Pages %d 0 R>>\n", pdf.numObj +1)
+	objLin = []byte(objStr)
+//	objLin = []byte("/Pages 3 0 R>>\n")
 	objSl = append(objSl, objLin...)
 
 	objLin = []byte("endobj\n")
@@ -1724,25 +1733,37 @@ func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
 	objEnd = objBegin + len(objSl)
 //fmt.Printf("root: %d %d\n", objSt, objEnd)
 
-	pdfobj.objId = 2
 	pdfobj.start = int(objSt)
 	pdfobj.end = int(objEnd)
 	pdfObjList = append(pdfObjList, pdfobj)
-	pdf.numObj++
-	pdf.rootId = 2
 
 	// pages
 	objSt = objEnd + 1
 	objEnd = -1
 
-	objLin = []byte("3 0 obj\n")
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	pdf.pagesId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+//	objLin = []byte("3 0 obj\n")
 	objSl = append(objSl, objLin...)
 
 	objLin = []byte("<</Type /Pages\n")
 	objSl = append(objSl, objLin...)
-	objLin = []byte("/Kids [4 0 R]\n")
+
+	// need to adjust for multiple pages
+
+	objStr = fmt.Sprintf("/Kids [%d 0 R]\n", pdf.numObj +1)
+	objLin = []byte(objStr)
+//	objLin = []byte("/Kids [4 0 R]\n")
 	objSl = append(objSl, objLin...)
-	objLin = []byte("/Count 1>>\n")
+
+	pgCount := 1
+
+	objStr = fmt.Sprintf("/Count %d>>\n", pgCount)
+	objLin = []byte(objStr)
+//	objLin = []byte("/Count 1>>\n")
 	objSl = append(objSl, objLin...)
 
 	objLin = []byte("endobj\n")
@@ -1752,12 +1773,175 @@ func (pdf *InfoPdf) CreatePdf(pdfFilnam string)(err error) {
 
 //fmt.Printf("objSt: %d %d\n", objSt, objEnd)
 
-	pdfobj.objId = 3
 	pdfobj.start = int(objSt)
 	pdfobj.end = int(objEnd)
 	pdfObjList = append(pdfObjList, pdfobj)
+
+	// page
+	objSt = objEnd + 1
+	objEnd = -1
+
 	pdf.numObj++
-	pdf.pagesId = 3
+	pdfobj.objId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+//	objLin = []byte("4 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /Page\n")
+	objSl = append(objSl, objLin...)
+
+	objStr = fmt.Sprintf("/Contents %d 0 R>>\n", pdf.numObj + 1)
+	objLin = []byte(objStr)
+//	objLin = []byte("/Contents 5 0 R>>\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+
+	// Content
+	objSt = objEnd + 1
+	objEnd = -1
+
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+//	objLin = []byte("5 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /Contents\n")
+	objSl = append(objSl, objLin...)
+
+	streamLen := 99
+	str := fmt.Sprintf("/Length %d\n", streamLen)
+	objLin = []byte(str)
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("/Filter /FlateDecode>>\n")
+	objSl = append(objSl, objLin...)
+
+
+	objLin = []byte("stream\n")
+	objSl = append(objSl, objLin...)
+	// insert stream
+
+	objLin = []byte("endstream\n")
+	objSl = append(objSl, objLin...)
+
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+
+
+// Font
+	objSt = objEnd + 1
+	objEnd = -1
+
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+//	objLin = []byte("4 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /Font\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/Subtype /TrueType\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/BaseFont /\"aaabbb + font\"\n")
+	objSl = append(objSl, objLin...)
+	objStr = fmt.Sprintf("/FontDescriptor %d 0 R>>\n", pdf.numObj + 1)
+	objLin = []byte(objStr)
+
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+
+// Font Descriptor
+	objSt = objEnd + 1
+	objEnd = -1
+
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+	//	objLin = []byte("4 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("<</Type /FontDescriptor\n")
+	objSl = append(objSl, objLin...)
+	objLin = []byte("/FontName /\"aaabbb + font\"\n")
+	objSl = append(objSl, objLin...)
+
+
+	objStr = fmt.Sprintf("/FontFile %d 0 R>>\n", pdf.numObj + 1)
+	objLin = []byte(objStr)
+
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
+
+	// FontFile
+	objSt = objEnd + 1
+	objEnd = -1
+
+	pdf.numObj++
+	pdfobj.objId = pdf.numObj
+	objStr = fmt.Sprintf("%d 0 obj\n", pdf.numObj)
+	objLin = []byte(objStr)
+	//	objLin = []byte("4 0 obj\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("stream\n")
+	objSl = append(objSl, objLin...)
+	// insert stream
+
+	objLin = []byte("endstream\n")
+	objSl = append(objSl, objLin...)
+
+	objLin = []byte("endobj\n")
+	objSl = append(objSl, objLin...)
+
+	objEnd = objBegin + len(objSl)
+
+//fmt.Printf("objSt: %d %d\n", objSt, objEnd)
+
+	pdfobj.start = int(objSt)
+	pdfobj.end = int(objEnd)
+	pdfObjList = append(pdfObjList, pdfobj)
 
 	pdfFil.Write(objSl)
 
