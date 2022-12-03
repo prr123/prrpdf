@@ -1175,7 +1175,140 @@ fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr
 
 }
 
-func (pdf *InfoPdf) DecodePdf(txtfil string)(err error) {
+func (pdf *InfoPdf) DecodePdf()(err error) {
+
+	var outstr string
+
+	buf := make([]byte,pdf.filSize)
+
+	_, err = (pdf.fil).Read(buf)
+	if err != nil {return fmt.Errorf("error Read: %v", err)}
+
+	pdf.buf = &buf
+
+	//read top two lines
+	txtstr, nextPos, err := pdf.readLine(0)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read top line: %v", err)
+		return fmt.Errorf(txtstr)
+	}
+	outstr = txtstr + "\n"
+
+	txtstr, nextPos, err = pdf.readLine(nextPos)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read second top line: %v", err)
+		return fmt.Errorf(txtstr)
+	}
+
+	// read last three lines
+
+	bufLen := len(buf)
+
+	ltStart := bufLen - 30
+	sByt := []byte("startxref")
+
+	ires := bytes.Index(buf[ltStart:], sByt)
+	if ires < 0 {
+		txtstr = "cannot find \"startxref\"!"
+		return fmt.Errorf(txtstr)
+	}
+
+	ltStart += ires
+	pdf.startxref = ltStart
+//	fmt.Printf("ires %d\n%s\n", ires, string(buf[ltStart:]))
+
+	txtstr, nextPos, err = pdf.readLine(ltStart)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read third last line: %v", err)
+		return fmt.Errorf(txtstr)
+	}
+	outstr += txtstr + "\n"
+
+	txtstr, nextPos, err = pdf.readLine(nextPos)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read second last line: %v", err)
+		return fmt.Errorf(txtstr)
+	}
+
+	xref := 0
+	_, err = fmt.Sscanf(txtstr, "%d", &xref)
+	if err != nil {
+		errconvStr := fmt.Sprintf("could not convert %s into xref: %v", txtstr, err)
+		return fmt.Errorf(errconvStr)
+	}
+	pdf.xref = xref
+
+//fmt.Printf("xref: %d\n", xref)
+
+	// last line
+	txtstr = string(buf[nextPos:])
+
+	tStart := ltStart - 200
+	tByt := []byte("trailer")
+
+	tres := bytes.Index(buf[tStart:ltStart], tByt)
+	if tres < 0 {
+		txtstr = "cannot find \"trailer\"!"
+		return fmt.Errorf(txtstr)
+	}
+
+	tStart += tres
+	pdf.trailer = tStart
+
+	txtstr, nextPos, err = pdf.readLine(tStart)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read line with \"trailer\": %v", err)
+		return fmt.Errorf(txtstr)
+	}
+
+	err = pdf.parseTrailer()
+	if err != nil {
+		txtstr = fmt.Sprintf("parse error \"trailer\": %v", err)
+		return fmt.Errorf(txtstr)
+	}
+
+	// trailer content
+
+	xByt := []byte("xref")
+
+	xres := bytes.Index(buf[pdf.xref:pdf.xref+7], xByt)
+	if xres < 0 {
+		txtstr = "cannot find \"xref\"!"
+		return fmt.Errorf(txtstr)
+	}
+
+//fmt.Printf("xres: %d\n", xres)
+
+	txtstr, nextPos, err = pdf.readLine(pdf.xref)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read line with \"xref\": %v", err)
+		return fmt.Errorf(txtstr)
+	}
+
+	// parse  Xref
+	err = pdf.parseXref()
+	if err != nil {return fmt.Errorf("parseXref: %v", err)}
+
+	//list each object
+	for i:=0; i< len(objList); i++ {
+		objstr, err := pdf.decodeObjStr(i)
+		if err != nil {
+			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
+			return fmt.Errorf(txtstr)
+		}
+	}
+
+	// create pdf dom tree
+	err = pdf.parseRoot()
+	if err != nil {return fmt.Errorf("parseRoot: %v", err)}
+
+	err = pdf.parsePages()
+	if err != nil {return fmt.Errorf("parsePages: %v", err)}
+
+	return nil
+}
+
+func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 
 	var outstr string
 
