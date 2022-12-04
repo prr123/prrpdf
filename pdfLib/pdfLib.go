@@ -1361,11 +1361,14 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 		txtFil.WriteString(outstr + txtstr + "\n")
 		return fmt.Errorf(txtstr)
 	}
+
 	pdf.objStart = nextPos
 
 	outstr += txtstr + "\n"
 
+	txtFil.WriteString("********* first two lines ***********\n")
 	txtFil.WriteString(outstr)
+//fmt.Printf("**** first two lines ***\n%s\n",outstr)
 
 	// read last three lines
 
@@ -1412,8 +1415,6 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	}
 	pdf.xref = xref
 
-//fmt.Printf("xref: %d\n", xref)
-
 	// last line
 	txtstr = string(buf[nextPos:])
 
@@ -1422,6 +1423,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	if buf[bufLen-1] != '\n' {outstr += "\n"}
 
 	txtFil.WriteString(outstr)
+//fmt.Printf("**** last three lines ***\n%s\n",outstr)
 
 
 	//trailer
@@ -1536,7 +1538,6 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	return nil
 }
 
-//aa
 func (pdf *InfoPdf) readObjList()(objList *[]pdfObj, err error) {
 
 	var objlist []pdfObj
@@ -1562,8 +1563,11 @@ func (pdf *InfoPdf) readObjList()(objList *[]pdfObj, err error) {
 func (pdf *InfoPdf) parseObjLin(linSl []byte, istate int )(newstate int, err error) {
 
 	var pdfobj pdfObj
+	var objList []pdfObj
 
-	objList := *pdf.rdObjList
+	if (pdf.rdObjList) != nil {
+		objList = *pdf.rdObjList
+	}
 
 	cObjIdx := len(objList) -1
 
@@ -1857,10 +1861,10 @@ func (pdf *InfoPdf) readLine(stPos int)(outstr string, nextPos int, err error) {
 
 	for i:=stPos; i < maxPos; i++ {
 //		fmt.Printf("i: %d char: %q\n",i, buf[i])
-		if buf[i] == '\n' {
+		if buf[i] == '\n' || buf[i] == '\r'{
 			endPos = i
 			nextPos = i+1
-			if buf[i-1] == '\r' {endPos = i-1}
+			if buf[i+1] == '\n' {nextPos++}
 			break
 		}
 	}
