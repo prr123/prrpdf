@@ -31,6 +31,16 @@ const (
 	A1
 )
 
+const (
+	Catalog = iota
+	Pages
+	Page
+	Contents
+	Font
+	FontDescriptor
+	Data
+)
+
 type InfoPdf struct {
 	fil *os.File
 	buf *[]byte
@@ -46,9 +56,11 @@ type InfoPdf struct {
 	xref int
 	startxref int
 	trailer int
+	objStart int
 	pageIds []int
 	pageList []pageObj
 	objList *[]pdfObj
+	rdObjList *[]pdfObj
 	pages *pagesObj
 //	doc pdfDoc
 }
@@ -1290,8 +1302,9 @@ func (pdf *InfoPdf) DecodePdf()(err error) {
 	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
 	//list each object
+	objList := *pdf.objList
 	for i:=0; i< len(objList); i++ {
-		objstr, err := pdf.decodeObjStr(i)
+		_, err := pdf.decodeObjStr(i)
 		if err != nil {
 			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
 			return fmt.Errorf(txtstr)
@@ -1309,6 +1322,7 @@ func (pdf *InfoPdf) DecodePdf()(err error) {
 }
 
 func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
+// method that decodes pdf file to text
 
 	var outstr string
 
@@ -1323,7 +1337,15 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 
 	pdf.buf = &buf
 
-	//read top two lines
+	// parsing sequence
+	// Step 1: top 2 lines
+	// Step 2: last 3 lines
+	// Step 3: trailer section
+	// Step 4: xref section
+	// Step 5: objs
+	//
+
+	//read first line
 	txtstr, nextPos, err := pdf.readLine(0)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read top line: %v", err)
@@ -1332,12 +1354,15 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	}
 	outstr = txtstr + "\n"
 
+	// second line
 	txtstr, nextPos, err = pdf.readLine(nextPos)
 	if err != nil {
 		txtstr = fmt.Sprintf("// read second top line: %v", err)
 		txtFil.WriteString(outstr + txtstr + "\n")
 		return fmt.Errorf(txtstr)
 	}
+	pdf.objStart = nextPos
+
 	outstr += txtstr + "\n"
 
 	txtFil.WriteString(outstr)
@@ -1398,6 +1423,8 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 
 	txtFil.WriteString(outstr)
 
+
+	//trailer
 	txtFil.WriteString("******** trailer ***********\n")
 
 	outstr = ""
@@ -1421,8 +1448,10 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 		return fmt.Errorf(txtstr)
 	}
 
+	// txtstr should be "trailer"
 	txtFil.WriteString(txtstr + "\n")
 
+	// parses for root, info and size
 	err = pdf.parseTrailer()
 	if err != nil {
 		txtstr = fmt.Sprintf("parse error \"trailer\": %v", err)
@@ -1434,6 +1463,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	txtstr = string(buf[nextPos:ltStart])
 	txtFil.WriteString(txtstr)
 
+	// xref section
 	txtFil.WriteString("******** xref ***********\n")
 	outstr = ""
 	xByt := []byte("xref")
@@ -1465,7 +1495,13 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	err = pdf.parseXref()
 	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
+	// pdf body consisting of a list of "obj"
 	txtFil.WriteString("******** obj list ***********\n")
+
+	// get Objects
+	rdObjList, err := pdf.readObjList()
+	if err != nil {return fmt.Errorf("readObjList: %v", err)}
+	pdf.rdObjList  = rdObjList
 
 	// list objs
 	objList := *pdf.objList
@@ -1501,6 +1537,99 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 }
 
 //aa
+func (pdf *InfoPdf) readObjList()(objList *[]pdfObj, err error) {
+
+	var objlist []pdfObj
+//	var obj pdfObj
+	var linSl []byte
+
+	buf := *pdf.buf
+
+	linSt := 0
+	istate := 0
+	for i:=pdf.objStart; i< pdf.xref; i++ {
+		if buf[i] == '\n' || buf[i] == '\r' {
+			linSl = buf[linSt:i]
+			nstate, err := pdf.parseObjLin(linSl, istate)
+			if err != nil {return nil, fmt.Errorf("parseObj: %v", err)}
+			istate = nstate
+		}
+	}
+
+	return &objlist, nil
+}
+
+func (pdf *InfoPdf) parseObjLin(linSl []byte, istate int )(newstate int, err error) {
+
+	var pdfobj pdfObj
+
+	objList := *pdf.rdObjList
+
+	cObjIdx := len(objList) -1
+
+	nxtLin := false
+	for is:= 0; is<5; is++ {
+
+		switch istate {
+		case 0:
+		// obj begin
+			id:=0
+			_, scerr := fmt.Sscanf(string(linSl), "%d 0 R", &id)
+			if scerr != nil {return istate, fmt.Errorf("obj start scan %s error: %v", string(linSl), scerr)}
+			pdfobj.objId = id
+			objList = append(objList, pdfobj)
+			istate++
+			nxtLin = true
+		case 1:
+		// obj type
+			idx := bytes.Index(linSl, []byte("/Type"))
+			if idx == -1 {
+				objList[cObjIdx].objTyp = Data
+			} else {
+				tpos :=0
+				for i:= 5; i< len(linSl);i++ {
+					if linSl[i] == '/' {
+						tpos = i
+						break
+					}
+				}
+				if tpos ==0 {return 0, fmt.Errorf("no type property found in %s", string(linSl))}
+				tepos := len(linSl)-1
+				for i:= tpos + 1; i< len(linSl);i++ {
+					if linSl[i] == '/' || linSl[i] == ' ' {
+						tepos = i
+						break
+					}
+				}
+				objTyp := string(linSl[tpos+1: tepos])
+fmt.Printf("obj %d id %d type %s\n", cObjIdx, objList[cObjIdx].objId, objTyp)
+			}
+			istate++
+			nxtLin = true
+		case 2:
+		// stream
+			istate = 4
+			nxtLin = false
+		case 3:
+		// endstream
+
+		case 4:
+		// end obj
+			idx := bytes.Index(linSl, []byte("endobj"))
+			if idx == -1 {return 0, fmt.Errorf("no endobj found in %s", string(linSl))}
+
+			nxtLin = true
+			istate = 0
+		default:
+			return istate, fmt.Errorf("invalid istate: %d", istate)
+		}
+		if nxtLin {break}
+	} // is
+	pdf.rdObjList = &objList
+	newstate = istate
+	return newstate, nil
+}
+
 func (pdf *InfoPdf) parseRoot()(err error) {
 
 	if pdf.rootId > pdf.numObj {return fmt.Errorf("invalid rootId!")}
@@ -1681,23 +1810,34 @@ func (pdf *InfoPdf) PrintPdf() {
 
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
 	fmt.Println()
-	fmt.Printf("Objects:    %5d\n", pdf.numObj)
 	fmt.Printf("Info:       %5d\n", pdf.infoId)
 	fmt.Printf("Root:       %5d\n", pdf.rootId)
 	fmt.Printf("Pages:      %5d\n", pdf.pagesId)
+
+
 	fmt.Printf("Xref:       %5d\n", pdf.xref)
 	fmt.Printf("trailer:    %5d\n", pdf.trailer)
 	fmt.Printf("startxref:  %5d\n", pdf.startxref)
 
+	fmt.Println()
+	fmt.Println("*********** xref Obj List *********************")
+	fmt.Printf("Objects: %5d Start: %7d\n", pdf.numObj, pdf.objStart)
 	fmt.Println("********************************")
-	fmt.Println("                       Content      Stream")
-	fmt.Println("Obj   Id start  end   Start  End  Start  End  Length")
+
+	fmt.Println("                             Content      Stream")
+	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
 	for i:= 0; i< len(*pdf.objList); i++ {
 		obj := (*pdf.objList)[i]
 		fmt.Printf("%3d: %3d %5d %5d %5d %5d %5d %5d %5d\n",
 		i, obj.objId, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt)
 	}
-	fmt.Println("********************************")
+	fmt.Println("*********** read Obj List *********************")
+	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
+	for i:= 0; i< len(*pdf.rdObjList); i++ {
+		obj := (*pdf.rdObjList)[i]
+		fmt.Printf("%3d %3d %5d\n", i, obj.objId, obj.start)
+	}
+	fmt.Println("************************************************")
 
 	return
 }
