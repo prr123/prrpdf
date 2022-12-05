@@ -1529,29 +1529,24 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	if err != nil {return fmt.Errorf("parseXref: %v", err)}
 
 	// pdf body consisting of a list of "obj"
-	txtFil.WriteString("******** obj list ***********\n")
+	txtFil.WriteString("******** sequential obj list ***********\n")
 
 	// get Objects directly
 	rdObjList, err := pdf.readObjList()
 	if err != nil {return fmt.Errorf("readObjList: %v", err)}
 	pdf.rdObjList  = rdObjList
+	txtFil.WriteString("Obj ObjId  start  end\n")
 	for i:=0; i< len(*rdObjList); i++ {
 		obj := (*rdObjList)[i]
-		outstr = fmt.Sprintf("obj [%3d]: start %5d end %5d\n", i, obj. objId, obj.start, obj.end)
+		outstr = fmt.Sprintf("%3d [%3d]: %5d %5d\n", i, obj.objId, obj.start, obj.end)
 		txtFil.WriteString(outstr)
 	}
 
-
-	// collect objecs from xref
 	objList := *pdf.objList
-	for i:=0; i< len(objList); i++ {
-		outstr = fmt.Sprintf("obj [%3d]: start %5d end %5d\n", i, objList[i].start, objList[i].end)
-		txtFil.WriteString(outstr)
-	}
 
 	//list each object
 	for i:=0; i< len(objList); i++ {
-		outstr = fmt.Sprintf("******** Obj %d ***********\n", i)
+		outstr = fmt.Sprintf("\n******** Obj %d ***********\n", i)
 		txtFil.WriteString(outstr)
 
 		objstr, err := pdf.decodeObjStr(i)
@@ -1562,6 +1557,19 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 		}
 		txtFil.WriteString(objstr)
 	}
+
+	// collect objecs from xref
+	txtFil.WriteString("******** xref obj list ***********\n")
+	txtFil.WriteString("                             Content      Stream\n")
+	txtFil.WriteString("Obj   Id type start  end   Start  End  Start  End  Length\n")
+	for i:= 0; i< len(*pdf.objList); i++ {
+		obj := (*pdf.objList)[i]
+		outstr = fmt.Sprintf("%3d: %3d  %2d  %5d %5d %5d %5d %5d %5d %5d   %-15s\n",
+		i, obj.objId, obj.typ, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt, obj.typstr)
+		txtFil.WriteString(outstr)
+	}
+	txtFil.WriteString("\n")
+
 
 	// create pdf dom tree
 	err = pdf.parseRoot()
