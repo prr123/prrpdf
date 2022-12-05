@@ -1608,7 +1608,7 @@ func (pdf *InfoPdf) readObjList()(rdobjList *[]pdfObj, err error) {
 		objList = append(objList, obj)
 	}
 
-fmt.Printf("objs: %d\n",len(objList) )
+//fmt.Printf("objs: %d\n",len(objList) )
 
 	return &objList, nil
 }
@@ -1619,7 +1619,7 @@ func (pdf *InfoPdf) parseObjLin(linSl []byte, istate int )(newstate int, err err
 	var pdfobj pdfObj
 	var objList []pdfObj
 
-fmt.Println("line: ",string(linSl))
+//fmt.Println("line: ",string(linSl))
 	if (pdf.rdObjList) != nil {
 		objList = *pdf.rdObjList
 	}
@@ -1801,8 +1801,11 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 	obj.streamSt = -1
 	obj.streamEnd = -1
 
-	// no vals for contSt and contEnd
+	// exception for info
+	if objId+1 == pdf.infoId {obj.typstr = "Info"}
+	(*pdf.objList)[objId] = obj
 
+	// no vals for contSt and contEnd
 	_, obj.contSt, err = pdf.readLine(obj.start)
 	if err != nil {return "", fmt.Errorf("no eol for obj %d: %v", objId, err)}
 
@@ -1819,7 +1822,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 	objByt = buf[obj.contSt:obj.contEnd]
 
-fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
+//fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
 
 	obj.simple = false
 
@@ -1841,13 +1844,11 @@ fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt
 
 	obj.contEnd = obj.contSt + xend +2
 
-fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
+//fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
 
 	// check type
 	ipos = bytes.Index(objByt, []byte("/Type"))
 	if ipos == -1 {goto endParse}
-
-
 
 	// has type
 	for i:= ipos+5; i< len(objByt); i++ {
@@ -1858,9 +1859,9 @@ fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.cont
 	}
 	if valst == -1 {return "", fmt.Errorf("no name for /type in obj %d found!", objId)}
 
-fmt.Printf("after /type: %s val %d: %s\n", string(objByt[2:7]), valst, string(objByt[valst:20]))
+//fmt.Printf("\nafter /type: %s valst %d: %s\n", string(objByt[ipos:ipos+5]), valst, string(objByt[valst:20]))
 
-	for i:= ipos+5; i< len(objByt); i++ {
+	for i:= valst+1; i< len(objByt); i++ {
 		switch objByt[i] {
 		case '/', '\r', '\n':
 			valend = i
@@ -1870,8 +1871,9 @@ fmt.Printf("after /type: %s val %d: %s\n", string(objByt[2:7]), valst, string(ob
 	}
 	if valend == -1 {return "", fmt.Errorf("no eol for val of /type in obj %d found!", objId)}
 
-	obj.typstr = string(objByt[valst:valend])
-fmt.Printf("obj: %d type val str: %s\n", objId, obj.typstr)
+	obj.typstr = string(objByt[(valst +1):valend])
+//fmt.Printf("obj: %d valstr [%d:%d]: %s\n", objId, valst, valend, obj.typstr)
+
 
 	(*pdf.objList)[objId] = obj
 
@@ -1926,14 +1928,15 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
 	for i:= 0; i< len(*pdf.objList); i++ {
 		obj := (*pdf.objList)[i]
-		fmt.Printf("%3d: %3d  %2d  %5d %5d %5d %5d %5d %5d %5d\n",
-		i, obj.objId, obj.typ, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt)
+		fmt.Printf("%3d: %3d  %2d  %5d %5d %5d %5d %5d %5d %5d   %-15s\n",
+		i, obj.objId, obj.typ, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt, obj.typstr)
 	}
-	fmt.Println("*********** read Obj List *********************")
-	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
+	fmt.Println()
+	fmt.Println("*********** sequential Obj List *********************")
+	fmt.Println("Obj seq  Id start  type")
 	for i:= 0; i< len(*pdf.rdObjList); i++ {
 		obj := (*pdf.rdObjList)[i]
-		fmt.Printf("%3d %3d %5d\n", i, obj.objId, obj.start)
+		fmt.Printf("%3d     %3d %5d\n", i, obj.objId, obj.start)
 	}
 	fmt.Println("************************************************")
 
