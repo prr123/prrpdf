@@ -68,7 +68,12 @@ type InfoPdf struct {
 
 type pdfObj struct {
 	objId int
-	objTyp int
+	typ int
+	typstr string
+	dict bool
+	array bool
+	simple bool
+	names *[]string
 	parent int
 	start int
 	end int
@@ -1526,7 +1531,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	// pdf body consisting of a list of "obj"
 	txtFil.WriteString("******** obj list ***********\n")
 
-	// get Objects
+	// get Objects directly
 	rdObjList, err := pdf.readObjList()
 	if err != nil {return fmt.Errorf("readObjList: %v", err)}
 	pdf.rdObjList  = rdObjList
@@ -1537,7 +1542,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	}
 
 
-	// list objs
+	// collect objecs from xref
 	objList := *pdf.objList
 	for i:=0; i< len(objList); i++ {
 		outstr = fmt.Sprintf("obj [%3d]: start %5d end %5d\n", i, objList[i].start, objList[i].end)
@@ -1638,7 +1643,7 @@ fmt.Println("line: ",string(linSl))
 		// obj type
 			idx := bytes.Index(linSl, []byte("/Type"))
 			if idx == -1 {
-				objList[cObjIdx].objTyp = Data
+				objList[cObjIdx].typ = Data
 			} else {
 				tpos :=0
 				for i:= 5; i< len(linSl);i++ {
@@ -1789,68 +1794,106 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 	obj := (*pdf.objList)[objId]
 	buf := *pdf.buf
 
-	brByt := []byte("obj")
-	objByt := buf[obj.start:obj.end]
+	valst := -1
+	valend := -1
+	ipos :=-1
+	xend := -1
+	obj.streamSt = -1
+	obj.streamEnd = -1
 
-	xres := bytes.Index(objByt, brByt)
+	// no vals for contSt and contEnd
+
+	_, obj.contSt, err = pdf.readLine(obj.start)
+	if err != nil {return "", fmt.Errorf("no eol for obj %d: %v", objId, err)}
+
+
+	// find stream
+	objByt := buf[obj.contSt:obj.end]
+	xres := bytes.Index(objByt, []byte("stream"))
 	if xres == -1 {
-		outstr += "no keyword \"obj\""
-		return outstr + "\n", fmt.Errorf(outstr)
+		obj.contEnd = obj.end -7
+	} else {
+		obj.streamSt = obj.contSt + xres
+		obj.contEnd = obj.contSt + xres
 	}
 
-	obj.contSt = obj.start + xres + 4
-	if buf[obj.contSt] == '\n' {obj.contSt++}
+	objByt = buf[obj.contSt:obj.contEnd]
 
-	brByt = []byte("endobj")
-	xres = bytes.Index(objByt, brByt)
-	if xres == -1 {
-		outstr += "no keyword \"endobj\""
-		return outstr + "\n", fmt.Errorf(outstr)
-	}
+fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
 
-	obj.contEnd = obj.start + xres
-	if buf[obj.contSt] == '\n' {obj.contSt++}
+	obj.simple = false
 
-
+	// is dictionary
 	xres = bytes.Index(objByt, []byte("<<"))
 
 	if xres <0 {
-		outstr = "no open brackets"
-	} else {
-		obj.contSt = obj.start + xres + 2
+		obj.dict = false
+		goto endParse
 	}
 
-	if xres>0 {
-		xres = bytes.LastIndex(objByt, []byte(">>"))
-		if xres == -1 {
-			outstr += "no closing brackets"
-			return outstr + "\n", fmt.Errorf(outstr)
-		}
-		obj.contEnd = obj.start + xres
+	obj.dict = true
+
+	xend = bytes.LastIndex(objByt, []byte(">>"))
+	if xend == -1 {
+		outstr += "no closing brackets in dict of obj"
+		return outstr + "\n", fmt.Errorf(outstr)
 	}
+
+	obj.contEnd = obj.contSt + xend +2
+
+fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
+
+	// check type
+	ipos = bytes.Index(objByt, []byte("/Type"))
+	if ipos == -1 {goto endParse}
+
+
+
+	// has type
+	for i:= ipos+5; i< len(objByt); i++ {
+		if objByt[i] == '/' {
+			valst = i
+			break
+		}
+	}
+	if valst == -1 {return "", fmt.Errorf("no name for /type in obj %d found!", objId)}
+
+fmt.Printf("after /type: %s val %d: %s\n", string(objByt[2:7]), valst, string(objByt[valst:20]))
+
+	for i:= ipos+5; i< len(objByt); i++ {
+		switch objByt[i] {
+		case '/', '\r', '\n':
+			valend = i
+		default:
+		}
+		if valend> -1 {break}
+	}
+	if valend == -1 {return "", fmt.Errorf("no eol for val of /type in obj %d found!", objId)}
+
+	obj.typstr = string(objByt[valst:valend])
+fmt.Printf("obj: %d type val str: %s\n", objId, obj.typstr)
+
 	(*pdf.objList)[objId] = obj
 
-	//getstream
-	sByt := []byte("stream")
+	endParse:
 
-	xres = bytes.Index(objByt, sByt)
-	if xres == -1 {
-		outstr = string(objByt)
+	//getstream
+	outstr = string(objByt)
+	if obj.streamSt < 0 {
 		outstr += "no keyword stream"
 		return outstr + "\n", nil
 	}
 
-	outstr = string(buf[obj.start: (obj.start + xres)])
 	outstr += "has stream\n"
-	obj.streamSt = obj.start + xres + 6
 
-	seByt := []byte("endstream")
-	xres = bytes.Index(objByt, seByt)
+	xres = bytes.Index(buf[obj.streamSt:obj.end], []byte("endstream"))
+
 	if xres == -1 {
 		outstr += " cannot find \"endstream\"\n"
 		return outstr + "\n", fmt.Errorf(outstr)
 	}
-	obj.streamEnd = obj.start + xres
+
+	obj.streamEnd = obj.streamSt + xres
 
 	(*pdf.objList)[objId] = obj
 
@@ -1883,8 +1926,8 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
 	for i:= 0; i< len(*pdf.objList); i++ {
 		obj := (*pdf.objList)[i]
-		fmt.Printf("%3d: %3d %5d %5d %5d %5d %5d %5d %5d\n",
-		i, obj.objId, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt)
+		fmt.Printf("%3d: %3d  %2d  %5d %5d %5d %5d %5d %5d %5d\n",
+		i, obj.objId, obj.typ, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt)
 	}
 	fmt.Println("*********** read Obj List *********************")
 	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
