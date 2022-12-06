@@ -385,13 +385,16 @@ func (pdf *InfoPdf) parseObjRef(key string, Start int, Type int)(objId int, err 
 	//find key
 	buf := *pdf.buf
 	keyByt := []byte("/" + key)
-	rootSt:=0
+	rootSt:= -1
 
 	linEnd := pdf.startxref
+	if (Start + 400) < linEnd {linEnd = Start+400}
+
 
 //fmt.Printf("trailer start: %d end: %d %s\n", Start, pdf.startxref, string(buf[Start:pdf.startxref]))
 
-//fmt.Printf("str [%d:%d]: %s\n", Start, End, string(buf[Start:End]))
+//fmt.Printf("key: %s\nstr [%d:%d]: %s\n", string(keyByt), Start, linEnd, string(buf[Start:(Start + 40)]))
+
 	for i:=Start; i< linEnd; i++ {
 		ires := bytes.Index(buf[Start: linEnd], keyByt)
 		if ires > -1 {
@@ -399,34 +402,32 @@ func (pdf *InfoPdf) parseObjRef(key string, Start int, Type int)(objId int, err 
 			break
 		}
 	}
-	if rootSt == 0 {return -1, fmt.Errorf("cannot find keyword %s", key)}
+	if rootSt == -1 {return -1, fmt.Errorf("cannot find keyword %s", key)}
 
-	rootEnd :=0
-	for i:=rootSt+4; i< linEnd; i++ {
-		if buf[i] == '/' {
+	valSt:= rootSt+len(keyByt)
+	rootEnd := -1
+	for i:=valSt; i< linEnd; i++ {
+		switch buf[i] {
+		case '/','\n','\r':
 			rootEnd = i
 			break
+		default:
 		}
-		if buf[i] == '\n' || buf[i] == '\r' {
-			rootEnd = i
-			break
-		}
-
 	}
-	if rootEnd == 0 {return -1, fmt.Errorf("cannot find obj after keyword %s!", key)}
 
+	if rootEnd == -1 {return -1, fmt.Errorf("cannot find end delimiter after key %s", key)}
 
-	keyObjStr := string(buf[(rootSt + len(key) +1):rootEnd])
+	keyObjStr := string(buf[valSt:rootEnd])
 
 //fmt.Printf("%s: %s\n", key, keyObjStr)
 
 	switch Type {
 	case 1:
 		val :=0
-		_, err = fmt.Sscanf( keyObjStr, " %d %d R", &objId, &val)
+		_, err = fmt.Sscanf(keyObjStr, " %d %d R", &objId, &val)
 		if err != nil {return -1, fmt.Errorf("cannot parse obj ref after keyword %s! %v", key, err)}
 	case 2:
-		_, err = fmt.Sscanf( keyObjStr, " %d", &objId)
+		_, err = fmt.Sscanf(keyObjStr, " %d", &objId)
 		if err != nil {return -1, fmt.Errorf("cannot parse obj val after keyword %s! %v", key, err)}
 	default:
 		return -1, fmt.Errorf("invalid obj value type!")
@@ -1799,10 +1800,10 @@ func (pdf *InfoPdf) parseRoot()(err error) {
 	if pdf.rootId > pdf.numObj {return fmt.Errorf("invalid rootId!")}
 	if pdf.rootId ==0 {return fmt.Errorf("rootId is 0!")}
 
-	obj := (*pdf.objList)[pdf.rootId -1]
+	obj := (*pdf.objList)[pdf.rootId]
 
 	objId, err := pdf.parseObjRef("Pages",obj.contSt, 1)
-	if err != nil {return fmt.Errorf("Root obj: parse \"Pages\" error: %v!", err)}
+	if err != nil {return fmt.Errorf("Root obj: parsing name \"/Pages\" error: %v!", err)}
 
 	pdf.pagesId = objId
 
@@ -1939,7 +1940,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 	objByt = buf[obj.contSt:obj.contEnd]
 
-fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
+//fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
 
 	obj.simple = false
 
