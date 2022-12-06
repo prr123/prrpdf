@@ -1356,7 +1356,7 @@ func (pdf *InfoPdf) DecodePdf()(err error) {
 	for i:=0; i< len(objList); i++ {
 		_, err := pdf.decodeObjStr(i)
 		if err != nil {
-			txtstr = fmt.Sprintf("// getObjStr %d: %v", i, err)
+			txtstr = fmt.Sprintf("// getObjStr Objid %d: %v", i, err)
 			return fmt.Errorf(txtstr)
 		}
 	}
@@ -1921,22 +1921,25 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 	_, obj.contSt, err = pdf.readLine(obj.start)
 	if err != nil {return "", fmt.Errorf("no eol for obj %d: %v", objId, err)}
 
-	// find stream
+	// find endobj
 	objByt := buf[obj.contSt:obj.end]
-	xres := bytes.Index(objByt, []byte("stream"))
-	if xres == -1 {
-		obj.contEnd = obj.end -8
-		// if ending is '\r\n'
-//fmt.Printf("conEnd: %q\n", buf[obj.contEnd])
-		if buf[obj.contEnd] == 'e' {obj.contEnd -=2}
-	} else {
+	xres := bytes.Index(objByt, []byte("endobj"))
+	if xres == -1 {return "", fmt.Errorf("no endobj for obj %d!", objId)}
+
+	endobj := obj.contSt + xres
+	obj.contEnd = endobj
+
+	// find stream
+	objByt = buf[obj.contSt:endobj]
+	xres = bytes.Index(objByt, []byte("stream"))
+	if xres > -1 {
 		obj.streamSt = obj.contSt + xres
-		obj.contEnd = obj.contSt + xres
+		obj.contEnd = obj.streamSt
 	}
 
 	objByt = buf[obj.contSt:obj.contEnd]
 
-//fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
+fmt.Printf("\nobj: %d stream: %d [%d:%d]: %s\n", objId, obj.streamSt, obj.contSt, obj.contEnd, string(objByt))
 
 	obj.simple = false
 
