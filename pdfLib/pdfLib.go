@@ -1286,15 +1286,15 @@ func (pdf *InfoPdf) DecodePdf()(err error) {
 	// last line
 	txtstr = string(buf[nextPos:])
 
-	tStart := ltStart - 200
-	tByt := []byte("trailer")
 
-	tres := bytes.Index(buf[tStart:ltStart], tByt)
+	// trailer
+	tStart := ltStart - 200
+
+	tres := bytes.Index(buf[tStart:ltStart], []byte("trailer"))
 	if tres < 0 {
 		txtstr = "cannot find \"trailer\"!"
 		return fmt.Errorf(txtstr)
 	}
-
 	tStart += tres
 	pdf.trailer = tStart
 
@@ -1408,9 +1408,9 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	outstr = ""
 
 	ltStart := bufLen - 30
-	sByt := []byte("startxref")
 
-	ires := bytes.Index(buf[ltStart:], sByt)
+	ires := bytes.Index(buf[ltStart:], []byte("startxref"))
+
 	if ires < 0 {
 		txtstr = "cannot find \"startxref\"!"
 		txtFil.WriteString(txtstr + "\n")
@@ -1447,16 +1447,49 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	pdf.xref = xref
 
 	// last line
-	txtstr = string(buf[nextPos:])
-
-	outstr += txtstr
-
+	outstr += string(buf[nextPos:])
 	if buf[bufLen-1] != '\n' {outstr += "\n"}
-
 	txtFil.WriteString(outstr)
+
+
+	// let's check whether there are multiple startref
+	ilast := bytes.Index(buf[xref - 10: xref], []byte("endobj"))
+	// this is a hack but clearer than putting all the subsequent code into the if statement
+	if ilast > 0 { goto parseTrailer}
+
+
+	txtFil.WriteString("found no \"endobj\" before \"xref\"\n")
+
+	// check for a second key "startref
+
+	ires = bytes.Index(buf[xref - 30:xref], []byte("startxref"))
+
+	if ires < 0 {
+		txtstr = "cannot find second\"xref\": !"
+		txtFil.WriteString(txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+
+	txtstr, nextPos, err = pdf.readLine(nextPos)
+	if err != nil {
+		txtstr = fmt.Sprintf("// read second last line: %v", err)
+		txtFil.WriteString(outstr + txtstr + "\n")
+		return fmt.Errorf(txtstr)
+	}
+	outstr += txtstr + "\n"
+
+	_, err = fmt.Sscanf(txtstr, "%d", &xref)
+	if err != nil {
+		errconvStr := fmt.Sprintf("could not convert %s into xref: %v", txtstr, err)
+		txtFil.WriteString(outstr + "error: " + errconvStr + "\n")
+		return fmt.Errorf(errconvStr)
+	}
+	pdf.xref = xref
+
 //fmt.Printf("**** last three lines ***\n%s\n",outstr)
 
-
+// after checking for multiple endings we can parse the correct trailer section
+parseTrailer:
 	//trailer
 	txtFil.WriteString("******** trailer ***********\n")
 
@@ -1595,21 +1628,33 @@ func (pdf *InfoPdf) readObjList()(rdobjList *[]pdfObj, err error) {
 
 	for i:=0;i<pdf.numObj; i++ {
 		obj.start = objSt
+
+//		if objIdx == -1 {return nil, fmt.Errorf("cannot find \"obj\" for obj %d of %d!", i, pdf.numObj)}
+
 		txtstr, nextPos, err := pdf.readLine(objSt)
 		if err != nil {return nil, fmt.Errorf("readLine error for obj %d: %v", i, err)}
-		if (nextPos - objSt) < 2 {
-			objSt = nextPos + 1
+		if len(txtstr) < 2 {
+			objSt = nextPos
 			txtstr, nextPos, err = pdf.readLine(objSt)
 		}
-		if txtstr == "xref" {break}
+
+		objIdx := bytes.Index(buf[objSt: objSt+30], []byte("xref"))
+		if objIdx > -1 {break}
+
+//		objIdx2 := bytes.Index(buf[objSt: objSt+30], []byte("obj")
+//		if objIdx == -1 {continue}
 
 		objId:= -1
 		fmt.Sscanf(txtstr,"%d 0 obj", &objId)
-		if objId == -1 {return nil, fmt.Errorf("obj %d no obj ref in %s found!", i, txtstr)}
+		if objId == -1 {return nil, fmt.Errorf("obj %d of %d no obj ref in \"%s\" found!", i, pdf.numObj, txtstr)}
 
 		idx := bytes.Index(buf[objSt:pdf.xref],[]byte("endobj"))
 		if idx == -1 {return nil, fmt.Errorf("no endobj in obj %d!",i+1)}
-		objSt = objSt + idx + 7
+
+		txtstr, nextPos, err = pdf.readLine(objSt +idx + 6)
+		if err != nil {return nil, fmt.Errorf("readLine \"endobj\" for obj %d: %v", i, err)}
+
+		objSt = nextPos
 
 		obj.objId = objId
 		obj.end = objSt + idx + 6
@@ -1932,6 +1977,11 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Printf("Objects: %5d Start: %7d\n", pdf.numObj, pdf.objStart)
 	fmt.Println("********************************")
 
+	if *pdf.objList == nil {
+		fmt.Println("objlist is nil!")
+		return
+	}
+
 	fmt.Println("                             Content      Stream")
 	fmt.Println("Obj   Id type start  end   Start  End  Start  End  Length")
 	for i:= 0; i< len(*pdf.objList); i++ {
@@ -1940,7 +1990,13 @@ func (pdf *InfoPdf) PrintPdf() {
 		i, obj.objId, obj.typ, obj.start, obj.end, obj.contSt, obj.contEnd, obj.streamSt, obj.streamEnd, obj.streamEnd - obj.streamSt, obj.typstr)
 	}
 	fmt.Println()
+
 	fmt.Println("*********** sequential Obj List *********************")
+	if *pdf.objList == nil {
+		fmt.Println("rdObjlist is nil!")
+		return
+	}
+
 	fmt.Println("Obj seq  Id start  type")
 	for i:= 0; i< len(*pdf.rdObjList); i++ {
 		obj := (*pdf.rdObjList)[i]
