@@ -1776,8 +1776,43 @@ func (pdf *InfoPdf) parseRoot()(err error) {
 
 	pdf.pagesId = objId
 
+	outstr, err := pdf.parseKeyText("Title", obj)
+	if err != nil {}
+//return fmt.Errorf("Root obj: parsing name \"/Title\" error: %v!", err)}
+
+fmt.Printf("Title: %s\n", outstr)
 	return nil
 }
+
+
+func (pdf *InfoPdf) parseKeyText(key string, obj pdfObj)(outstr string, err error) {
+
+	buf:= *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("found key: %s in %s\n", key, string(objByt))
+
+	keyByt := []byte("/" + key)
+	ipos := bytes.Index(objByt, keyByt)
+	if ipos == -1 {return fmt.Sprintf("no /%s",key), fmt.Errorf("could not find keyword \"%s\"!", key)}
+
+	valSt:= obj.contSt + ipos + len(keyByt) + 1
+	rootEnd := -1
+	for i:=valSt; i< obj.contEnd; i++ {
+		switch buf[i] {
+		case '/','\n','\r':
+			rootEnd = i
+			break
+		default:
+		}
+	}
+
+	if rootEnd == -1 {return fmt.Sprintf("/%s no value", key), fmt.Errorf("cannot find end delimiter after key %s", key)}
+
+	outstr = string(buf[valSt:rootEnd])
+
+	return outstr, nil
+}
+
 
 func (pdf *InfoPdf) parsePages()(err error) {
 
@@ -1794,11 +1829,67 @@ func (pdf *InfoPdf) parsePages()(err error) {
 	err = pdf.parseMbox(obj)
 	if err!= nil {return fmt.Errorf("parseKids %v", err)}
 
+	err = pdf.parseResources(obj)
+	if err!= nil {return fmt.Errorf("parseKids %v", err)}
+
 	return nil
 
 //	st = pdf.findKeyWord("Resources", obj)
 }
 
+
+func (pdf *InfoPdf) parseResources(obj pdfObj)(err error) {
+
+	buf := *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+fmt.Printf("Resources: %s\n",string(objByt))
+
+	idx := bytes.Index(objByt, []byte("/Resources"))
+	if idx == -1 {return fmt.Errorf("cannot find keyword \"/Resources\"")}
+
+	// either indirect or a dictionary
+	valst := obj.contSt + idx + len("/Resources") +1
+	objByt = buf[valst: obj.contEnd]
+fmt.Printf("Resources valstr: %s\n",string(objByt))
+
+	idict := bytes.Index(objByt, []byte("<<"))
+	if idict == -1 {goto parseRef}
+
+fmt.Println("Resources: dictionary")
+
+	// find Font
+
+
+	// ExtGState
+
+
+	// ProcSet
+
+	return nil
+
+parseRef:
+
+fmt.Println("Resources: indirect obj")
+	valend := -1
+	for i:= valst; i< obj.contEnd; i++ {
+		if buf[i] == 'R' {
+			valend = i+1
+			break
+		}
+	}
+	if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Resources\"")}
+	inObjStr := string(buf[valst:valend])
+
+fmt.Printf("ind obj: %s\n", inObjStr)
+
+	objId :=0
+	rev := 0
+	_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+	if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Resources\": %v", inObjStr, err)}
+
+	fmt.Printf("Resource Id: %d\n", objId)
+	return nil
+}
 
 func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
 
@@ -2067,6 +2158,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 func (pdf *InfoPdf) PrintPdf() {
 
+	fmt.Println("\n******************** Info Pdf **********************\n")
 	fmt.Printf("File Name: %s\n", pdf.filNam)
 	fmt.Printf("File Size: %d\n", pdf.filSize)
 	fmt.Println()
@@ -2090,9 +2182,9 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Printf("startxref Loc: %5d\n", pdf.startxref)
 
 	fmt.Println()
-	fmt.Printf("*********** xref Obj List [%d] *********************\n", pdf.numObj)
-	fmt.Printf("Objects: %5d Start: %7d\n", pdf.numObj, pdf.objStart)
-	fmt.Println("********************************")
+	fmt.Printf("*********************** xref Obj List [%3d] *********************\n", pdf.numObj)
+	fmt.Printf("Objects: %5d    First Object Start Pos: %2d\n", pdf.numObj, pdf.objStart)
+	fmt.Println("*****************************************************************")
 
 	if *pdf.objList == nil {
 		fmt.Println("objlist is nil!")
