@@ -64,7 +64,7 @@ type InfoPdf struct {
 	rdObjList *[]pdfObj
 	test bool
 	Font string
-	mediaBox [4]float32
+	mediabox *[4]float32
 //	doc pdfDoc
 }
 
@@ -1786,9 +1786,7 @@ func (pdf *InfoPdf) parsePages()(err error) {
 
 	obj := (*pdf.objList)[pdf.pagesId]
 
-	buf:= *pdf.buf
-
-	fmt.Printf("pages:\n%s\n", string(buf[obj.start: obj.end]))
+//fmt.Printf("pages:\n%s\n", string(buf[obj.start: obj.end]))
 
 	err = pdf.parseKids(obj)
 	if err!= nil {return fmt.Errorf("parseKids %v", err)}
@@ -1896,10 +1894,11 @@ func (pdf *InfoPdf) parseMbox(obj pdfObj)(err error) {
 //fmt.Printf("brack [%d: %d]: %s\n", opPar, opEnd, string(buf[opPar:opEnd]))
 
 	// parse references
-	_, errsc := fmt.Sscanf(string(buf[opPar:opEnd]),"%d %d %d %d", &mbox[0], &mbox[1], &mbox[2], &mbox[3])
+	_, errsc := fmt.Sscanf(string(buf[opPar:opEnd]),"%f %f %f %f", &mbox[0], &mbox[1], &mbox[2], &mbox[3])
 	if errsc != nil {fmt.Errorf("scan error mbox: %v", errsc)}
 
-	fmt.Printf("mbox: %v\n",mbox)
+//fmt.Printf("mbox: %v\n",mbox)
+	pdf.mediabox = &mbox
 	return nil
 }
 
@@ -2073,6 +2072,13 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println()
 
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
+	if pdf.mediabox != nil {
+		fmt.Printf("MediaBox:    ")
+		for i:=0; i< 4; i++ {
+			fmt.Printf(" %.2f", (*pdf.mediabox)[i])
+		}
+	}
+	fmt.Println()
 	fmt.Println()
 	fmt.Printf("Info Id:    %5d\n", pdf.infoId)
 	fmt.Printf("Root Id:    %5d\n", pdf.rootId)
