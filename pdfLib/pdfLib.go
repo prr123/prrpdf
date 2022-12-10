@@ -1853,7 +1853,7 @@ fmt.Printf("testing page %d string:\n%s\n", iPage+1, string(buf[obj.start: obj.e
 	} else {
 		pgobj.mediabox = mbox
 		outstr = fmt.Sprintf("MediaBox: %.1f %.1f %.1f %.1f\n", mbox[0], mbox[1], mbox[2], mbox[3])
-		
+		txtFil.WriteString(outstr)
 		fmt.Println(outstr)
 	}
 
@@ -1944,19 +1944,144 @@ fmt.Printf("ind obj: %s\n", inObjStr)
 
 fmt.Println("**** Resources: dictionary *****")
 
-	dictEnd := bytes.LastIndex(objByt, []byte(">>"))
+	resByt := buf[valst: obj.contEnd -2]
+fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd-2, string(resByt))
+
+	// short cut to be fixed by parsing nesting levels
+	dictEnd := bytes.LastIndex(resByt, []byte(">>"))
 	if dictEnd == -1 {return fmt.Errorf("no end brackets for dict!")}
+
+	tByt := buf[valst: valst+dictEnd-2]
+	tEnd := bytes.LastIndex(tByt, []byte(">>"))
+	tSt := bytes.LastIndex(tByt, []byte("<<"))
+	if tEnd < tSt {dictEnd = tEnd}
+
+	if dictEnd == -1 {return fmt.Errorf("no end brackets for dict!")}
+
 
 	dictSt += valst +2
 	dictEnd += valst
 	dictByt := buf[dictSt:dictEnd]
 fmt.Printf("Resource Dict [%d: %d]: %s\n", dictSt, dictEnd, string(dictByt))
+fmt.Println()
+
 	// find Font
+fmt.Println("**** Font: dictionary *****")
+	fidx := bytes.Index(dictByt, []byte("/Font"))
+	if fidx == -1 {return fmt.Errorf("cannot find keyword \"/Font\"")}
+
+	fvalst := dictSt + fidx + len("/Font")
+	fontByt := buf[fvalst: dictEnd]
+//fmt.Printf("font valstr [%d:%d]: %s\n",fvalst, dictEnd, string(fontByt))
+
+	fdictSt := bytes.Index(fontByt, []byte("<<"))
+//fmt.Printf("font dictSt: %d\n", fdictSt)
+
+	if fdictSt == -1 {
+//fmt.Println("Resources: indirect obj")
+		valend := -1
+		for i:= valst; i< dictEnd; i++ {
+			if buf[i] == 'R' {
+				valend = i+1
+				break
+			}
+		}
+		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Font\"")}
+		inObjStr := string(buf[valst:valend])
+
+//fmt.Printf("ind obj: %s\n", inObjStr)
+
+		objId :=0
+		rev := 0
+		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Font\": %v", inObjStr, err)}
+
+		fmt.Printf("Font indirect Obj Id: %d\n", objId)
+
+		return nil
+	}
+
+
+	fdictEnd := bytes.Index(fontByt, []byte(">>"))
+	if fdictEnd == -1 {return fmt.Errorf("no end brackets for font dict!")}
+
+	fdictSt += fvalst +2
+	fdictEnd += fvalst
+	fontDictByt := buf[fdictSt:fdictEnd]
+fmt.Printf("Font Dict [%d: %d]: %s\n", fdictSt, fdictEnd, string(fontDictByt))
+
+
 
 	// ExtGState
+fmt.Println("\n**** ExtGState: dictionary *****")
+
+	gidx := bytes.Index(dictByt, []byte("/ExtGState"))
+	if gidx == -1 {return fmt.Errorf("cannot find keyword \"/ExtGState\"")}
+
+
+	gvalst := dictSt + gidx + len("/ExtGState")
+	gByt := buf[gvalst: dictEnd]
+//fmt.Printf("Gstate valstr [%d:%d]: %s\n",gvalst, dictEnd, string(gByt))
+
+	gdictSt := bytes.Index(gByt, []byte("<<"))
+//fmt.Printf("font dictSt: %d\n", fdictSt)
+
+	if gdictSt == -1 {
+//fmt.Println("Resources: indirect obj")
+		valend := -1
+		for i:= gvalst; i< dictEnd; i++ {
+			if buf[i] == 'R' {
+				valend = i+1
+				break
+			}
+		}
+		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/ExtGState\"")}
+		inObjStr := string(buf[gvalst:valend])
+
+//fmt.Printf("ind obj: %s\n", inObjStr)
+
+		objId :=0
+		rev := 0
+		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/ExtGState\": %v", inObjStr, err)}
+
+		fmt.Printf("Font indirect Obj Id: %d\n", objId)
+
+		return nil
+	}
+
+
+	gdictEnd := bytes.Index(gByt, []byte(">>"))
+	if gdictEnd == -1 {return fmt.Errorf("no end brackets for GState dict!")}
+
+	gdictSt += gvalst +2
+	gdictEnd += gvalst
+	gDictByt := buf[gdictSt:gdictEnd]
+fmt.Printf("GState Dict [%d: %d]: %s\n", gdictSt, gdictEnd, string(gDictByt))
 
 
 	// ProcSet
+fmt.Println("\n**** ProcSet: array *****")
+
+	pidx := bytes.Index(dictByt, []byte("/ProcSet"))
+	if pidx == -1 {return fmt.Errorf("cannot find keyword \"/ProcSet\"")}
+
+
+	pvalst := dictSt + pidx + len("/ProcSet")
+	pByt := buf[pvalst: dictEnd]
+//fmt.Printf("ProcSet valstr [%d:%d]: %s\n",pvalst, dictEnd, string(pByt))
+
+	parrSt := bytes.Index(pByt, []byte("["))
+//fmt.Printf("font dictSt: %d\n", fdictSt)
+
+	parrEnd := bytes.Index(pByt, []byte("]"))
+	if parrEnd == -1 {return fmt.Errorf("no end bracket for ProcSet array!")}
+
+	parrSt += pvalst +1
+	parrEnd += pvalst
+	parrByt := buf[parrSt:parrEnd]
+fmt.Printf("ProcSet Array [%d: %d]: %s\n", parrSt, parrEnd, string(parrByt))
+
 
 	return nil
 }
