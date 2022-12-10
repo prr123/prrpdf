@@ -44,6 +44,7 @@ const (
 
 type InfoPdf struct {
 	fil *os.File
+	txtFil *os.File
 	buf *[]byte
 	filSize int64
 	filNam string
@@ -85,24 +86,25 @@ type pdfObj struct {
 	streamEnd int
 }
 
-type pagesObj struct {
-	kids []int
-}
-
 type pgObj struct {
 	pageNum int
-	mediabox [4]int
+	mediabox *[4]float32
 	contentId int
 	parentId int
 	fonts *[]fontObj
-	extgstate map[string]int
+	graphics *[]graphObj
+}
+
+type graphObj struct {
+	graphId int
 }
 
 type fontObj struct {
+	fontId int
+	fontDesc int
 	name string
 	typ int
 	glNum int
-// desc
 }
 
 
@@ -826,15 +828,6 @@ func (pdf *InfoPdf) parsePagesOld(instr string)(err error) {
 }
 
 
-func (pdf *InfoPdf) parsePage(pgNum int)(page *pgObj, err error) {
-
-//fmt.Println("***** instr parsePage")
-//fmt.Println(instr)
-//fmt.Println("***** end instr")
-
-	return page, nil
-}
-
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
 fmt.Println("**** Content ***")
@@ -946,6 +939,7 @@ func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 	if err != nil {return fmt.Errorf("error creating textFile %s: %v\n", textFile, err);}
 	defer txtFil.Close()
 
+	pdf.txtFil = txtFil
 	buf := make([]byte,pdf.filSize)
 
 	_, err = (pdf.fil).Read(buf)
@@ -1157,18 +1151,19 @@ fmt.Println(pageStr)
 
 fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr ********\n",pg +1, id +1, pageStr)
 
-		pagObj, err := pdf.parsePage(pg)
+		err := pdf.parsePage(pg)
 		if err != nil {
 			outstr = fmt.Sprintf("// error parsing Page %d: %v\n",pg ,err)
 			txtFil.WriteString(outstr)
 			return fmt.Errorf("error parsing Page: %v", err)
 		}
-		outstr = fmt.Sprintf("// Page %d parsed successfully\n%v\n",pg ,pagObj)
+		pgObj := (*pdf.pageList)[pg]
+		outstr = fmt.Sprintf("// Page %d parsed successfully\n",pg)
 		txtFil.WriteString(outstr)
 
 
 		// need to parse each Page
-		id = pagObj.contentId -1
+		id = pgObj.contentId
 		hdstr = fmt.Sprintf("************ Content Page %d [Obj %d] **************\n", pg+1, id+1)
 		txtFil.WriteString(hdstr)
 
@@ -1338,6 +1333,8 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	txtFil, err := os.Create(txtfil)
 	if err != nil {return fmt.Errorf("error creating textFile %s: %v\n", txtfil, err);}
 	defer txtFil.Close()
+
+	pdf.txtFil = txtFil
 
 	buf := make([]byte,pdf.filSize)
 
@@ -1614,28 +1611,35 @@ parseTrailer:
 	}
 	txtFil.WriteString("\n")
 
-fmt.Println("\n*** parse Pdf Tree ***")
+fmt.Println("\n*** parsing Pdf Tree ***\n")
 	// create pdf dom tree
+
+
+fmt.Println("\n****** parsing Obj \"Catalog\" ******\n")
 	err = pdf.parseRoot()
 	if err != nil {return fmt.Errorf("parseRoot: %v", err)}
 	txtFil.WriteString("parsed \"Root\" successfully!\n")
-fmt.Printf("** parsed Root successfully **\n")
+fmt.Printf("*** parsed Obj \"Catalog\" successfully ***\n")
 
-fmt.Printf("\n******* parsing Obj Pages *******\n")
-
-
+fmt.Printf("\n******* parsing Obj \"Pages\" *******\n")
 	err = pdf.parsePages()
 	if err != nil {return fmt.Errorf("parsePages: %v", err)}
 	txtFil.WriteString("parsed \"Pages\" successfully!\n")
 fmt.Printf("***** parsed Pages successfully ******\n")
-
 fmt.Println()
 
-	return nil
-/*
-	err = pdf.parsePages()
-	if err != nil {return fmt.Errorf("parsePages: %v", err)}
-*/
+//ppp
+	for ipg:=0; ipg< pdf.pageCount; ipg++ {
+		fmt.Printf("******* parsing Obj \"Page %d\" *******\n", ipg + 1)
+		err = pdf.parsePage(ipg)
+		if err != nil {return fmt.Errorf("parsePage %d: %v",ipg, err)}
+		outstr := fmt.Sprintf("\"Page %d\" successfully!\n", ipg)
+		txtFil.WriteString(outstr)
+	fmt.Printf("***** parsed \"Page %d\" successfully ******\n", ipg +1)
+	fmt.Println()
+
+	}
+
 	return nil
 }
 
@@ -1813,6 +1817,56 @@ func (pdf *InfoPdf) parseKeyText(key string, obj pdfObj)(outstr string, err erro
 	return outstr, nil
 }
 
+//page
+func (pdf *InfoPdf) parsePage(iPage int)(err error) {
+
+	var pgobj pgObj
+
+//	pgList := pdf.pageList
+	pgId := pdf.pageIds[iPage]
+	buf := *pdf.buf
+	txtFil := pdf.txtFil
+
+	outstr := fmt.Sprintf("***** Page %d: id %d *******\n", iPage+1, pgId)
+	fmt.Printf(outstr)
+	txtFil.WriteString(outstr)
+
+	obj := (*pdf.objList)[pgId]
+//	pgobj := (*pdf.pgList)[iPage]
+
+fmt.Printf("testing page %d string:\n%s\n", iPage+1, string(buf[obj.start: obj.end]))
+
+	objId, err := pdf.parseObjRef("Contents",obj.contSt, 1)
+	if err != nil {return fmt.Errorf("parse \"Contents\" error: %v!", err)}
+//	pdf.rootId = objId
+
+	outstr = fmt.Sprintf("Contents Obj: %d\n", objId)
+	fmt.Printf(outstr)
+	txtFil.WriteString(outstr)
+
+	pgobj.contentId = objId
+
+	mbox, err := pdf.parseMbox(obj)
+	if err!= nil {
+		pdf.txtFil.WriteString("no Name \"/MediaBox\" found!\n")
+		fmt.Println("no Name \"/MediaBox\" found!")
+	} else {
+		pgobj.mediabox = mbox
+		outstr = fmt.Sprintf("MediaBox: %.1f %.1f %.1f %.1f\n", mbox[0], mbox[1], mbox[2], mbox[3])
+		
+		fmt.Println(outstr)
+	}
+
+	err = pdf.parseResources(obj)
+	if err!= nil {
+		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
+		fmt.Println("no Name \"/Resources\" found!")
+	}
+
+	(*pdf.pageList)[iPage] = pgobj
+
+	return nil
+}
 
 func (pdf *InfoPdf) parsePages()(err error) {
 
@@ -1826,15 +1880,24 @@ func (pdf *InfoPdf) parsePages()(err error) {
 	err = pdf.parseKids(obj)
 	if err!= nil {return fmt.Errorf("parseKids %v", err)}
 
-	err = pdf.parseMbox(obj)
-	if err!= nil {return fmt.Errorf("parseKids %v", err)}
+fmt.Printf("pages: pageCount: %d\n", pdf.pageCount)
+	pageList := make([]pgObj, pdf.pageCount)
+
+	mbox, err := pdf.parseMbox(obj)
+	if err!= nil {
+		pdf.txtFil.WriteString("no Name \"/MediaBox\" found!\n")
+		fmt.Println("no Name \"/MediaBox\" found!")
+	}
+	pdf.mediabox = mbox
 
 	err = pdf.parseResources(obj)
-	if err!= nil {return fmt.Errorf("parseKids %v", err)}
+	if err!= nil {
+		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
+		fmt.Println("no Name \"/Resources\" found!")
+	}
 
+	pdf.pageList = &pageList
 	return nil
-
-//	st = pdf.findKeyWord("Resources", obj)
 }
 
 
@@ -1842,52 +1905,59 @@ func (pdf *InfoPdf) parseResources(obj pdfObj)(err error) {
 
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
-fmt.Printf("Resources: %s\n",string(objByt))
+//fmt.Printf("Resources: %s\n",string(objByt))
 
 	idx := bytes.Index(objByt, []byte("/Resources"))
 	if idx == -1 {return fmt.Errorf("cannot find keyword \"/Resources\"")}
 
 	// either indirect or a dictionary
-	valst := obj.contSt + idx + len("/Resources") +1
+	valst := obj.contSt + idx + len("/Resources")
 	objByt = buf[valst: obj.contEnd]
-fmt.Printf("Resources valstr: %s\n",string(objByt))
+//fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd, string(objByt))
 
-	idict := bytes.Index(objByt, []byte("<<"))
-	if idict == -1 {goto parseRef}
+	dictSt := bytes.Index(objByt, []byte("<<"))
+//fmt.Printf("dictSt: %d\n", dictSt)
 
-fmt.Println("Resources: dictionary")
+	if dictSt == -1 {
+//fmt.Println("Resources: indirect obj")
+		valend := -1
+		for i:= valst; i< obj.contEnd; i++ {
+			if buf[i] == 'R' {
+				valend = i+1
+				break
+			}
+		}
+		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Resources\"")}
+		inObjStr := string(buf[valst:valend])
 
+fmt.Printf("ind obj: %s\n", inObjStr)
+
+		objId :=0
+		rev := 0
+		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Resources\": %v", inObjStr, err)}
+
+		fmt.Printf("Resource Id: %d\n", objId)
+
+		return nil
+	}
+
+fmt.Println("**** Resources: dictionary *****")
+
+	dictEnd := bytes.LastIndex(objByt, []byte(">>"))
+	if dictEnd == -1 {return fmt.Errorf("no end brackets for dict!")}
+
+	dictSt += valst +2
+	dictEnd += valst
+	dictByt := buf[dictSt:dictEnd]
+fmt.Printf("Resource Dict [%d: %d]: %s\n", dictSt, dictEnd, string(dictByt))
 	// find Font
-
 
 	// ExtGState
 
 
 	// ProcSet
 
-	return nil
-
-parseRef:
-
-fmt.Println("Resources: indirect obj")
-	valend := -1
-	for i:= valst; i< obj.contEnd; i++ {
-		if buf[i] == 'R' {
-			valend = i+1
-			break
-		}
-	}
-	if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Resources\"")}
-	inObjStr := string(buf[valst:valend])
-
-fmt.Printf("ind obj: %s\n", inObjStr)
-
-	objId :=0
-	rev := 0
-	_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
-	if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Resources\": %v", inObjStr, err)}
-
-	fmt.Printf("Resource Id: %d\n", objId)
 	return nil
 }
 
@@ -1950,15 +2020,16 @@ func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
 }
 
 //aa
-func (pdf *InfoPdf) parseMbox(obj pdfObj)(err error) {
+func (pdf *InfoPdf) parseMbox(obj pdfObj)(mBox *[4]float32, err error) {
 
 	var mbox [4]float32
+
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
 //fmt.Printf("Mbox: %s\n",string(objByt))
 
 	idx := bytes.Index(objByt, []byte("/MediaBox"))
-	if idx == -1 {return fmt.Errorf("cannot find keyword \"/MediaBox\"")}
+	if idx == -1 {return nil, fmt.Errorf("cannot find keyword \"/MediaBox\"")}
 
 	opPar := -1
 	opEnd := -1
@@ -1980,17 +2051,16 @@ func (pdf *InfoPdf) parseMbox(obj pdfObj)(err error) {
 		if fini {break}
 	}
 
-	if opEnd <= opPar {fmt.Errorf("no matching square brackets in seq!")}
+	if opEnd <= opPar {return nil, fmt.Errorf("no matching square brackets in seq!")}
 
 //fmt.Printf("brack [%d: %d]: %s\n", opPar, opEnd, string(buf[opPar:opEnd]))
 
 	// parse references
 	_, errsc := fmt.Sscanf(string(buf[opPar:opEnd]),"%f %f %f %f", &mbox[0], &mbox[1], &mbox[2], &mbox[3])
-	if errsc != nil {fmt.Errorf("scan error mbox: %v", errsc)}
+	if errsc != nil {return nil, fmt.Errorf("scan error mbox: %v", errsc)}
 
 //fmt.Printf("mbox: %v\n",mbox)
-	pdf.mediabox = &mbox
-	return nil
+	return &mbox, nil
 }
 
 
@@ -2212,7 +2282,15 @@ func (pdf *InfoPdf) PrintPdf() {
 		fmt.Printf("%3d     %3d %5d\n", i, obj.objId, obj.start)
 	}
 	fmt.Println("************************************************")
+	fmt.Println()
 
+	for ipg:=0; ipg< pdf.pageCount; ipg++ {
+		pgobj := (*pdf.pageList)[ipg]
+		fmt.Printf("*********** Page %d *********************\n", ipg + 1)
+		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
+
+		fmt.Println("************************************************")
+	}
 	return
 }
 
