@@ -1566,16 +1566,15 @@ fmt.Printf("\n******* parsing Obj \"Pages\" *******\n")
 fmt.Printf("***** parsed Pages successfully ******\n")
 fmt.Println()
 
-//ppp
+	// parsing each Page Obj
 	for ipg:=0; ipg< pdf.pageCount; ipg++ {
 		fmt.Printf("******* parsing Obj \"Page %d\" *******\n", ipg + 1)
 		err = pdf.parsePage(ipg)
 		if err != nil {return fmt.Errorf("parsePage %d: %v",ipg, err)}
 		outstr := fmt.Sprintf("\"Page %d\" successfully!\n", ipg)
 		txtFil.WriteString(outstr)
-	fmt.Printf("***** parsed \"Page %d\" successfully ******\n", ipg +1)
-	fmt.Println()
-
+		fmt.Printf("***** parsed \"Page %d\" successfully ******\n", ipg +1)
+		fmt.Println()
 	}
 
 	return nil
@@ -1794,16 +1793,20 @@ fmt.Printf("testing page %d string:\n%s\n", iPage+1, string(buf[obj.start: obj.e
 		fmt.Println(outstr)
 	}
 
-	resList, err := pdf.parseResources(obj)
-	if err!= nil {
-		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
-		fmt.Println("no Name \"/Resources\" found!")
+	reslist, err := pdf.parseResources(obj)
+//fmt.Printf("page %d reslist: %v\n", iPage, reslist)
+	if err != nil {
+		outstr := fmt.Sprintf("parsing error \"/Resources\": %v!\n", err)
+		pdf.txtFil.WriteString(outstr)
+		fmt.Println(outstr)
 	}
 
-//lll
-	pgobj.fonts = resList.fonts
-	pgobj.gStates = resList.gStates
+	if reslist != nil {
+		if reslist.fonts != nil {pgobj.fonts = reslist.fonts}
+		if reslist.gStates != nil {pgobj.gStates = reslist.gStates}
+	}
 
+//fmt.Printf("page %d: %v\n", iPage, pgobj)
 	(*pdf.pageList)[iPage] = pgobj
 
 	return nil
@@ -1831,15 +1834,18 @@ fmt.Printf("pages: pageCount: %d\n", pdf.pageCount)
 	}
 	pdf.mediabox = mbox
 
-	resList, err := pdf.parseResources(obj)
+	reslist, err := pdf.parseResources(obj)
 	if err!= nil {
 		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
 		fmt.Println("no Name \"/Resources\" found!")
 	}
 
-	pdf.fonts = resList.fonts
-	pdf.gStates = resList.gStates
+//fmt.Printf("resList: %v\n", reslist)
 
+	if reslist != nil {
+		if reslist.fonts != nil {pdf.fonts = reslist.fonts}
+		if reslist.gStates != nil {pdf.gStates = reslist.gStates}
+	}
 	pdf.pageList = &pageList
 	return nil
 }
@@ -1891,7 +1897,7 @@ fmt.Printf("ind obj: %s\n", inObjStr)
 fmt.Println("**** Resources: dictionary *****")
 
 	resByt := buf[valst: obj.contEnd -2]
-fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd-2, string(resByt))
+//fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd-2, string(resByt))
 
 	// short cut to be fixed by parsing nesting levels
 	dictEnd := bytes.LastIndex(resByt, []byte(">>"))
@@ -1908,7 +1914,7 @@ fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd-2, string(resByt)
 	dictSt += valst +2
 	dictEnd += valst
 	dictByt := buf[dictSt:dictEnd]
-fmt.Printf("Resource Dict [%d: %d]: %s\n", dictSt, dictEnd, string(dictByt))
+fmt.Printf("Resource Dict [%d: %d]:\n%s\n", dictSt, dictEnd, string(dictByt))
 fmt.Println()
 
 	// find Font
@@ -1924,7 +1930,7 @@ fmt.Println("**** Font: dictionary *****")
 //fmt.Printf("font dictSt: %d\n", fdictSt)
 
 	if fdictSt == -1 {
-//fmt.Println("Resources: indirect obj")
+fmt.Println("Resources: indirect obj")
 		valend := -1
 		for i:= valst; i< dictEnd; i++ {
 			if buf[i] == 'R' {
@@ -1954,13 +1960,13 @@ fmt.Println("**** Font: dictionary *****")
 	fdictSt += fvalst +2
 	fdictEnd += fvalst
 	fontDictByt := buf[fdictSt:fdictEnd]
+
 fmt.Printf("Font Dict [%d: %d]: %s\n", fdictSt, fdictEnd, string(fontDictByt))
 
-//func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 	objList, err := pdf.parseIrefCol(&fontDictByt)
-	if err != nil {return nil, fmt.Errorf("parsing font objs error: %v")}
+	if err != nil {return nil, fmt.Errorf("parsing font objs error: %v", err)}
 	reslist.fonts = objList
-
+fmt.Printf("fonts: %v reslist: %v\n",objList, reslist.fonts)
 
 	// ExtGState
 fmt.Println("\n**** ExtGState: dictionary *****")
@@ -2035,10 +2041,10 @@ fmt.Println("\n**** ProcSet: array *****")
 	parrByt := buf[parrSt:parrEnd]
 fmt.Printf("ProcSet Array [%d: %d]: %s\n", parrSt, parrEnd, string(parrByt))
 
-	return resList, nil
+	return &reslist, nil
 }
 
-//ff
+
 func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 
 	var objref objRef
@@ -2049,7 +2055,6 @@ func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 	val := 0
 	objId := -1
 
-//	st := 0
 	refCount := 0
 	istate := 0
 
@@ -2076,9 +2081,10 @@ func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 		case 2:
 		// look for end of obj reference
 			if buf[i] == 'R' {
-				objEnd = i
+				objEnd = i+1
 				refCount++
-				_, errsc := fmt.Sscanf(string(buf[namEnd:objEnd]),"%d %d R", &objId, &val)
+//fmt.Printf(" inobjref: \"%s\"\n", string(buf[namEnd:objEnd]))
+				_, errsc := fmt.Sscanf(string(buf[namEnd:objEnd])," %d %d R", &objId, &val)
 				if errsc != nil {return nil, fmt.Errorf("parse obj ref error of obj %d: %v", refCount, errsc)}
 
 				if namEnd< namSt {return nil, fmt.Errorf("parse obj name error of obj %d!", refCount)}
@@ -2381,12 +2387,33 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println()
 
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
-	if pdf.mediabox != nil {
+	if pdf.mediabox == nil {
+		fmt.Printf("no MediaBox\n")
+	} else {
 		fmt.Printf("MediaBox:    ")
 		for i:=0; i< 4; i++ {
 			fmt.Printf(" %.2f", (*pdf.mediabox)[i])
 		}
 	}
+	if pdf.fonts == nil {
+		fmt.Println("-- no Fonts")
+	} else {
+		fmt.Println("-- Font Ids:")
+fmt.Printf("fonts: %v\n", pdf.fonts)
+		for i:=0; i< len(*pdf.fonts); i++ {
+				fmt.Printf("   %s %d\n", (*pdf.fonts)[i].Nam, (*pdf.fonts)[i].Id)
+		}
+	}
+	if pdf.gStates == nil {
+		fmt.Println("-- no ExtGstates")
+	} else {
+		fmt.Println("-- ExtGstate Ids:")
+		for i:=0; i< len(*pdf.gStates); i++ {
+			fmt.Printf("   %s %d\n", (*pdf.gStates)[i].Nam, (*pdf.gStates)[i].Id)
+		}
+	}
+
+
 	fmt.Println()
 	fmt.Println()
 	fmt.Printf("Info Id:    %5d\n", pdf.infoId)
@@ -2432,13 +2459,43 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println()
 
 	for ipg:=0; ipg< pdf.pageCount; ipg++ {
-		pgobj := (*pdf.pageList)[ipg]
-		fmt.Printf("*********** Page %d *********************\n", ipg + 1)
-		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
-
-		fmt.Println("************************************************")
+		pdf.PrintPage(ipg)
 	}
 	return
+}
+
+func (pdf *InfoPdf) PrintPage(iPage int) {
+		pgobj := (*pdf.pageList)[iPage]
+		fmt.Printf("****************** Page %d *********************\n", iPage + 1)
+		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
+		fmt.Printf("Media Box: ")
+		if pgobj.mediabox == nil {
+			fmt.Printf("no\n")
+		} else {
+			mbox := pgobj.mediabox
+			for i:=0; i< 4; i++ {fmt.Printf(" %.1f", mbox[i])}
+			fmt.Printf("\n")
+		}
+		fmt.Printf("Resources:\n")
+		if pgobj.fonts == nil {
+			fmt.Println("-- no Fonts")
+		} else {
+			fmt.Println("-- Font Ids:")
+fmt.Printf("fonts: %v\n", pgobj.fonts)
+			for i:=0; i< len(*pgobj.fonts); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.fonts)[i].Nam, (*pgobj.fonts)[i].Id)
+			}
+		}
+		if pgobj.gStates == nil {
+			fmt.Println("-- no ExtGstates")
+		} else {
+			fmt.Println("-- ExtGstate Ids:")
+			for i:=0; i< len(*pgobj.gStates); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.gStates)[i].Nam, (*pgobj.gStates)[i].Id)
+			}
+		}
+		fmt.Println("**********************************************")
+
 }
 
 //rr
