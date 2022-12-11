@@ -59,7 +59,7 @@ type InfoPdf struct {
 	startxref int
 	trailer int
 	objStart int
-	pageIds []int
+	pageIds *[]int
 	pageList *[]pgObj
 	objList *[]pdfObj
 	rdObjList *[]pdfObj
@@ -752,82 +752,6 @@ func (pdf *InfoPdf) parseXref()(err error) {
 }
 
 
-func (pdf *InfoPdf) parsePagesOld(instr string)(err error) {
-
-//fmt.Printf("\n*****\nparsePages:\n%s\n***\n", instr)
-
-	kvm, err := pdf.getKvMap(instr)
-	if err != nil {return fmt.Errorf("getVkMap error %v", err)}
-
-//	for key, val := range kvm {
-//		fmt.Printf("key: %s value: %s\n", key, val)
-//	}
-
-	//Type
-	val, ok := kvm["Type"]
-	if !ok {return fmt.Errorf("Pages: found no Type prop")}
-	if val != "/Pages" {return fmt.Errorf("Pages: Type prop is not Pages")}
-
-	// Count
-	val, ok = kvm["Count"]
-	if !ok {return fmt.Errorf("Pages: found no Count prop")}
-	count := 0
-	_, err = fmt.Sscanf(val, "%d", &count)
-	if err != nil {return fmt.Errorf("Pages: cannot convert Count value!")}
-
-	pdf.pageCount = count
-	pdf.pageIds = make([]int,pdf.pageCount)
-
-	//kids
-	val, ok = kvm["Kids"]
-	if !ok {return fmt.Errorf("Pages: found no Kids prop!")}
-
-	istate :=0
-	stPos :=-1
-	endPos :=-1
-	pgCount :=0
-	pgSt :=0
-	pgId :=0
-	pgRev :=0
-	for i:=0; i< len(val); i++ {
-		switch istate {
-		case 0:
-			if val[i] == '[' {
-				stPos = i
-				istate =1
-				pgSt = i+1
-			}
-		case 1:
-			if val[i] == 'R' {
-				pgStr := string(val[pgSt:(i+1)])
-
-				_, errPg := fmt.Sscanf(pgStr,"%d %d R",&pgId, &pgRev)
-				if errPg != nil {return fmt.Errorf("Pages: page %d str %s cannot be parsed: %v", pgCount, pgStr, errPg)}
-
-				pdf.pageIds[pgCount] = pgId
-				pgSt = i+1
-				pgCount++
-				if (pgCount == count) {istate = 2}
-			}
-
-		case 2:
-			if val[i] == ']' {
-				endPos = i
-				istate =3
-			}
-		case 3:
-			break
-		default:
-		}
-	} //i
-
-	if stPos == -1 {return fmt.Errorf("Pages: Kids val has no open bracket '['!")}
-	if endPos == -1 {return fmt.Errorf("Pages: Kids val has no closing bracket ']'!")}
-
-	return nil
-}
-
-
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
 fmt.Println("**** Content ***")
@@ -1122,7 +1046,7 @@ fmt.Printf("************ root **************\n%s", rootStr)
 	txtFil.WriteString( "string: \n" + pagesStr + "***** end string\n")
 fmt.Printf("************ pages **********\n")
 fmt.Println(pagesStr)
-	err = pdf.parsePagesOld(pagesStr)
+	err = pdf.parsePages()
 	if err != nil {
 		outstr = fmt.Sprintf("// error parsing Pages: %v\n", err)
 		txtFil.WriteString(outstr)
@@ -1140,8 +1064,8 @@ fmt.Println(pagesStr)
 	// Page
 	for pg:=0; pg<(pdf.pageCount ); pg++ {
 
-		id := pdf.pageIds[pg] -1
-		hdstr := fmt.Sprintf("************ Page %d [Obj: %d] **************\n", pg+1, id+1)
+		id := (*pdf.pageIds)[pg]
+		hdstr := fmt.Sprintf("************ Page %d [Obj: %d] **************\n", pg+1, id)
 		txtFil.WriteString(hdstr)
 
 		pageStr := string(buf[(pdfObjList[id].contSt):(pdfObjList[id].contEnd)]) + "\n"
@@ -1822,8 +1746,7 @@ func (pdf *InfoPdf) parsePage(iPage int)(err error) {
 
 	var pgobj pgObj
 
-//	pgList := pdf.pageList
-	pgId := pdf.pageIds[iPage]
+	pgId := (*pdf.pageIds)[iPage]
 	buf := *pdf.buf
 	txtFil := pdf.txtFil
 
@@ -1878,7 +1801,7 @@ func (pdf *InfoPdf) parsePages()(err error) {
 //fmt.Printf("pages:\n%s\n", string(buf[obj.start: obj.end]))
 
 	err = pdf.parseKids(obj)
-	if err!= nil {return fmt.Errorf("parseKids %v", err)}
+	if err!= nil {return fmt.Errorf("parseKids: %v", err)}
 
 fmt.Printf("pages: pageCount: %d\n", pdf.pageCount)
 	pageList := make([]pgObj, pdf.pageCount)
@@ -2117,31 +2040,46 @@ func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
 
 	if opEnd <= opPar {fmt.Errorf("no matching square brackets in seq!")}
 
-//fmt.Printf("brack [%d: %d]: %s\n", opPar, opEnd, string(buf[opPar:opEnd]))
+//fmt.Printf("brack [%d: %d]: \"%s\"\n", opPar, opEnd, string(buf[opPar:opEnd]))
 
-	// parse references
-	pg := make([]int, 0, 10)
-	st := opPar
-	page := 0
-	iref := -1
-	val :=0
+	arBuf := buf[opPar:opEnd]
+	pgList, err := pdf.parseIrefArray(&arBuf)
+	if err != nil {return fmt.Errorf("parseArray: %v", err)}
+
+	pdf.pageCount = len(*pgList)
+	pdf.pageIds = pgList
+
+	fmt.Printf("Objects: %v Count: %d\n",pgList, len(*pgList))
+	return nil
+}
+
+
+func (pdf *InfoPdf) parseIrefArray(inbuf *[]byte)(idList *[]int, err error) {
+
+	var pg []int
+
+	buf := *inbuf
+
+	val := 0
 	pgId := -1
-	for i:= opPar; i< opEnd; i++ {
+
+	st := 0
+	refCount := 0
+	iref := -1
+
+	for i:= 0; i< len(buf); i++ {
 		if buf[i] == 'R' {
 			iref = i
-			page++
-			_, errsc := fmt.Sscanf(string(buf[st:iref]),"%d %d R", &pgId, &val)
-			if errsc != nil {fmt.Errorf("scan error page %d: %v", page, errsc)}
+			refCount++
+			_, errsc := fmt.Sscanf(string(buf[st:iref+1]),"%d %d R", &pgId, &val)
+			if errsc != nil {return nil, fmt.Errorf("scan error obj %d: %v", refCount, errsc)}
 			pg = append(pg, pgId)
 			st = i+1
 		}
 	}
 
-	pdf.pageCount = len(pg)
-	pdf.pageIds = pg
 
-	fmt.Printf("pages: %v\n",pg)
-	return nil
+	return &pg, nil
 }
 
 //aa
