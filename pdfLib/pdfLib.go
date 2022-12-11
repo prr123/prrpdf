@@ -63,6 +63,9 @@ type InfoPdf struct {
 	pageList *[]pgObj
 	objList *[]pdfObj
 	rdObjList *[]pdfObj
+	fonts *[]objRef
+	gStates *[]objRef
+	fontAux *[]fontAuxObj
 	test bool
 	Font string
 	mediabox *[4]float32
@@ -91,27 +94,38 @@ type pgObj struct {
 	mediabox *[4]float32
 	contentId int
 	parentId int
-	fonts *[]fontObj
-	graphics *[]graphObj
+	fonts *[]objRef
+	gStates *[]objRef
+	fontAux *[]fontAuxObj
 }
 
-type graphObj struct {
-	graphId int
+type objRef struct {
+	Id int
+	Nam string
 }
 
-type fontObj struct {
-	fontId int
+type fontAuxObj struct {
 	fontDesc int
 	name string
 	typ int
 	glNum int
 }
 
+type gObj struct {
+	gObjItem  objRef
+}
+
+type resourceList struct {
+	fonts *[]objRef
+	gStates *[]objRef
+}
 
 type pdfDoc struct {
 	pageType int
 
 }
+
+
 
 func Init()(info *InfoPdf) {
 	var pdf InfoPdf
@@ -1780,11 +1794,15 @@ fmt.Printf("testing page %d string:\n%s\n", iPage+1, string(buf[obj.start: obj.e
 		fmt.Println(outstr)
 	}
 
-	err = pdf.parseResources(obj)
+	resList, err := pdf.parseResources(obj)
 	if err!= nil {
 		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
 		fmt.Println("no Name \"/Resources\" found!")
 	}
+
+//lll
+	pgobj.fonts = resList.fonts
+	pgobj.gStates = resList.gStates
 
 	(*pdf.pageList)[iPage] = pgobj
 
@@ -1813,25 +1831,30 @@ fmt.Printf("pages: pageCount: %d\n", pdf.pageCount)
 	}
 	pdf.mediabox = mbox
 
-	err = pdf.parseResources(obj)
+	resList, err := pdf.parseResources(obj)
 	if err!= nil {
 		pdf.txtFil.WriteString("no Name \"/Resources\" found!\n")
 		fmt.Println("no Name \"/Resources\" found!")
 	}
 
+	pdf.fonts = resList.fonts
+	pdf.gStates = resList.gStates
+
 	pdf.pageList = &pageList
 	return nil
 }
 
+//rrr
+func (pdf *InfoPdf) parseResources(obj pdfObj)(resList *resourceList , err error) {
 
-func (pdf *InfoPdf) parseResources(obj pdfObj)(err error) {
+	var reslist resourceList
 
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
 //fmt.Printf("Resources: %s\n",string(objByt))
 
 	idx := bytes.Index(objByt, []byte("/Resources"))
-	if idx == -1 {return fmt.Errorf("cannot find keyword \"/Resources\"")}
+	if idx == -1 {return nil, fmt.Errorf("cannot find keyword \"/Resources\"")}
 
 	// either indirect or a dictionary
 	valst := obj.contSt + idx + len("/Resources")
@@ -1850,7 +1873,7 @@ func (pdf *InfoPdf) parseResources(obj pdfObj)(err error) {
 				break
 			}
 		}
-		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Resources\"")}
+		if valend == -1 {return nil, fmt.Errorf("cannot find R for indirect obj of \"/Resources\"")}
 		inObjStr := string(buf[valst:valend])
 
 fmt.Printf("ind obj: %s\n", inObjStr)
@@ -1858,11 +1881,11 @@ fmt.Printf("ind obj: %s\n", inObjStr)
 		objId :=0
 		rev := 0
 		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
-		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Resources\": %v", inObjStr, err)}
+		if err != nil{return nil, fmt.Errorf("cannot parse %s as indirect obj of \"/Resources\": %v", inObjStr, err)}
 
 		fmt.Printf("Resource Id: %d\n", objId)
 
-		return nil
+		return nil, nil
 	}
 
 fmt.Println("**** Resources: dictionary *****")
@@ -1872,14 +1895,14 @@ fmt.Printf("Resources valstr [%d:%d]: %s\n",valst, obj.contEnd-2, string(resByt)
 
 	// short cut to be fixed by parsing nesting levels
 	dictEnd := bytes.LastIndex(resByt, []byte(">>"))
-	if dictEnd == -1 {return fmt.Errorf("no end brackets for dict!")}
+	if dictEnd == -1 {return nil, fmt.Errorf("no end brackets for dict!")}
 
 	tByt := buf[valst: valst+dictEnd-2]
 	tEnd := bytes.LastIndex(tByt, []byte(">>"))
 	tSt := bytes.LastIndex(tByt, []byte("<<"))
 	if tEnd < tSt {dictEnd = tEnd}
 
-	if dictEnd == -1 {return fmt.Errorf("no end brackets for dict!")}
+	if dictEnd == -1 {return nil, fmt.Errorf("no end brackets for dict!")}
 
 
 	dictSt += valst +2
@@ -1891,7 +1914,7 @@ fmt.Println()
 	// find Font
 fmt.Println("**** Font: dictionary *****")
 	fidx := bytes.Index(dictByt, []byte("/Font"))
-	if fidx == -1 {return fmt.Errorf("cannot find keyword \"/Font\"")}
+	if fidx == -1 {return nil, fmt.Errorf("cannot find keyword \"/Font\"")}
 
 	fvalst := dictSt + fidx + len("/Font")
 	fontByt := buf[fvalst: dictEnd]
@@ -1909,7 +1932,7 @@ fmt.Println("**** Font: dictionary *****")
 				break
 			}
 		}
-		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/Font\"")}
+		if valend == -1 {return nil, fmt.Errorf("cannot find R for indirect obj of \"/Font\"")}
 		inObjStr := string(buf[valst:valend])
 
 //fmt.Printf("ind obj: %s\n", inObjStr)
@@ -1917,29 +1940,33 @@ fmt.Println("**** Font: dictionary *****")
 		objId :=0
 		rev := 0
 		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
-		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/Font\": %v", inObjStr, err)}
+		if err != nil{return nil, fmt.Errorf("cannot parse %s as indirect obj of \"/Font\": %v", inObjStr, err)}
 
 		fmt.Printf("Font indirect Obj Id: %d\n", objId)
 
-		return nil
+		return nil, nil
 	}
 
 
 	fdictEnd := bytes.Index(fontByt, []byte(">>"))
-	if fdictEnd == -1 {return fmt.Errorf("no end brackets for font dict!")}
+	if fdictEnd == -1 {return nil, fmt.Errorf("no end brackets for font dict!")}
 
 	fdictSt += fvalst +2
 	fdictEnd += fvalst
 	fontDictByt := buf[fdictSt:fdictEnd]
 fmt.Printf("Font Dict [%d: %d]: %s\n", fdictSt, fdictEnd, string(fontDictByt))
 
+//func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
+	objList, err := pdf.parseIrefCol(&fontDictByt)
+	if err != nil {return nil, fmt.Errorf("parsing font objs error: %v")}
+	reslist.fonts = objList
 
 
 	// ExtGState
 fmt.Println("\n**** ExtGState: dictionary *****")
 
 	gidx := bytes.Index(dictByt, []byte("/ExtGState"))
-	if gidx == -1 {return fmt.Errorf("cannot find keyword \"/ExtGState\"")}
+	if gidx == -1 {return nil, fmt.Errorf("cannot find keyword \"/ExtGState\"")}
 
 
 	gvalst := dictSt + gidx + len("/ExtGState")
@@ -1958,7 +1985,7 @@ fmt.Println("\n**** ExtGState: dictionary *****")
 				break
 			}
 		}
-		if valend == -1 {return fmt.Errorf("cannot find R for indirect obj of \"/ExtGState\"")}
+		if valend == -1 {return nil, fmt.Errorf("cannot find R for indirect obj of \"/ExtGState\"")}
 		inObjStr := string(buf[gvalst:valend])
 
 //fmt.Printf("ind obj: %s\n", inObjStr)
@@ -1966,28 +1993,31 @@ fmt.Println("\n**** ExtGState: dictionary *****")
 		objId :=0
 		rev := 0
 		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
-		if err != nil{return fmt.Errorf("cannot parse %s as indirect obj of \"/ExtGState\": %v", inObjStr, err)}
+		if err != nil{return nil, fmt.Errorf("cannot parse %s as indirect obj of \"/ExtGState\": %v", inObjStr, err)}
 
-		fmt.Printf("Font indirect Obj Id: %d\n", objId)
+		fmt.Printf("ExtGState indirect Obj Id: %d\n", objId)
 
-		return nil
+		return nil, nil
 	}
 
 
 	gdictEnd := bytes.Index(gByt, []byte(">>"))
-	if gdictEnd == -1 {return fmt.Errorf("no end brackets for GState dict!")}
+	if gdictEnd == -1 {return nil, fmt.Errorf("no end brackets for GState dict!")}
 
 	gdictSt += gvalst +2
 	gdictEnd += gvalst
 	gDictByt := buf[gdictSt:gdictEnd]
 fmt.Printf("GState Dict [%d: %d]: %s\n", gdictSt, gdictEnd, string(gDictByt))
 
+	gobjList, err := pdf.parseIrefCol(&gDictByt)
+	if err != nil {return nil, fmt.Errorf("parsing font objs error: %v")}
+	reslist.gStates = gobjList
 
 	// ProcSet
 fmt.Println("\n**** ProcSet: array *****")
 
 	pidx := bytes.Index(dictByt, []byte("/ProcSet"))
-	if pidx == -1 {return fmt.Errorf("cannot find keyword \"/ProcSet\"")}
+	if pidx == -1 {return nil, fmt.Errorf("cannot find keyword \"/ProcSet\"")}
 
 
 	pvalst := dictSt + pidx + len("/ProcSet")
@@ -1998,15 +2028,71 @@ fmt.Println("\n**** ProcSet: array *****")
 //fmt.Printf("font dictSt: %d\n", fdictSt)
 
 	parrEnd := bytes.Index(pByt, []byte("]"))
-	if parrEnd == -1 {return fmt.Errorf("no end bracket for ProcSet array!")}
+	if parrEnd == -1 {return nil, fmt.Errorf("no end bracket for ProcSet array!")}
 
 	parrSt += pvalst +1
 	parrEnd += pvalst
 	parrByt := buf[parrSt:parrEnd]
 fmt.Printf("ProcSet Array [%d: %d]: %s\n", parrSt, parrEnd, string(parrByt))
 
+	return resList, nil
+}
 
-	return nil
+//ff
+func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
+
+	var objref objRef
+	var reflist []objRef
+
+	buf := *inbuf
+
+	val := 0
+	objId := -1
+
+//	st := 0
+	refCount := 0
+	istate := 0
+
+	objEnd := -1
+	namSt:= -1
+	namEnd := -1
+
+	for i:= 0; i< len(buf); i++ {
+
+		switch istate {
+		case 0:
+		// look for start of obj name
+			if buf[i] == '/' {
+				namSt = i+1
+				istate = 1
+			}
+		case 1:
+		// look for end of obj name
+			if buf[i] == ' ' {
+				namEnd = i
+				istate = 2
+			}
+
+		case 2:
+		// look for end of obj reference
+			if buf[i] == 'R' {
+				objEnd = i
+				refCount++
+				_, errsc := fmt.Sscanf(string(buf[namEnd:objEnd]),"%d %d R", &objId, &val)
+				if errsc != nil {return nil, fmt.Errorf("parse obj ref error of obj %d: %v", refCount, errsc)}
+
+				if namEnd< namSt {return nil, fmt.Errorf("parse obj name error of obj %d!", refCount)}
+				objref.Id = objId
+				objref.Nam = string(buf[namSt:namEnd])
+				reflist = append(reflist, objref)
+				istate = 0
+			}
+		default:
+		}
+	}
+
+
+	return &reflist, nil
 }
 
 func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
@@ -2077,8 +2163,6 @@ func (pdf *InfoPdf) parseIrefArray(inbuf *[]byte)(idList *[]int, err error) {
 			st = i+1
 		}
 	}
-
-
 	return &pg, nil
 }
 
