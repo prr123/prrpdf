@@ -14,8 +14,8 @@ package pdflib
 import (
 	"os"
 	"fmt"
-	"strconv"
-	"strings"
+//	"strconv"
+//	"strings"
 	"bytes"
 	"io"
 	"compress/zlib"
@@ -43,12 +43,14 @@ const (
 )
 
 type InfoPdf struct {
+	majver int
+	minver int
 	fil *os.File
 	txtFil *os.File
 	buf *[]byte
 	filSize int64
 	filNam string
-	sizeObj int
+//	sizeObj int
 	objSize int
 	numObj int
 	pageCount int
@@ -66,10 +68,9 @@ type InfoPdf struct {
 	fonts *[]objRef
 	gStates *[]objRef
 	fontAux *[]fontAuxObj
-	test bool
-	Font string
 	mediabox *[4]float32
-//	doc pdfDoc
+	test bool
+	verb bool
 }
 
 type pdfObj struct {
@@ -96,6 +97,7 @@ type pgObj struct {
 	parentId int
 	fonts *[]objRef
 	gStates *[]objRef
+	xObjs *[]objRef
 	fontAux *[]fontAuxObj
 }
 
@@ -118,6 +120,7 @@ type gObj struct {
 type resourceList struct {
 	fonts *[]objRef
 	gStates *[]objRef
+	xObjs *[]objRef
 }
 
 type pdfDoc struct {
@@ -153,194 +156,124 @@ func (pdf *InfoPdf) ReadPdf(parseFilnam string) (err error) {
 }
 
 
-func (pdf *InfoPdf) parseTopTwoLines(buf []byte)(outstr string, err error) {
+func (pdf *InfoPdf) parseTopTwoLines()(err error) {
+
+	buf := *pdf.buf
+
+	maxPos := 20
+	if len(buf) < maxPos {maxPos = len(buf)}
 
 	//read top line
-	end_fl :=0
-	for i:=0; i<len(buf); i++ {
+	endFl := -1
+	for i:=0; i<maxPos; i++ {
 		if (buf[i] == '\n') {
-			end_fl = i
+			endFl = i
 			break
 		}
 	}
-	if end_fl ==0 {
-		outstr = "// no eol in first line!\n"
-		return outstr, fmt.Errorf("no eol in first line!")
-	}
+	if endFl == -1 {return fmt.Errorf("no eol in first line!")}
 
-	endFl := end_fl
-	if buf[end_fl -1] == '\r' {endFl = endFl-1}
-
-	outstr = string(buf[:endFl]) + "   // "
-
-	if string(buf[:5]) != "%PDF-" {
-		outstr += "no match to \"%%PDF-\" string in first line!\n"
-		return outstr, fmt.Errorf("first line %s string is not \"%%PDF-\"!", string(buf[:5]))
-	}
+	idx := bytes.Index(buf[:5],[]byte("%PDF-"))
+	if idx == -1 {return fmt.Errorf("first line %s string is not \"%%PDF-\"!", string(buf[:5]))}
 
 	verStr := string(buf[5:endFl])
-	version, err := strconv.ParseFloat(verStr, 32)
-	if err != nil {
-		outstr += fmt.Sprintf("version is not a valid float: %v!\n", err)
-		return outstr, fmt.Errorf("error converting pdf version %s: %v", verStr, err)
-	}
 
-	if (version < 1.0) || (version > 2.0) {
-		outstr += fmt.Sprintf("invalid pdf version %.2f\n", version)
-		return outstr, fmt.Errorf("invalid pdf version %.2f", version)
-	}
+	majver:= 99
+	minver:= 99
+	_, err = fmt.Sscanf(verStr, "%d.%d", &majver, &minver)
+	if err != nil {return fmt.Errorf("cannot parse pdf version: %v!",err)}
 
-	outstr += "pdf version: " + verStr + " valid.\n"
+	fmt.Printf("pdf version maj:min: %d:%d\n", majver, minver)
+
+	if majver > 2 {return fmt.Errorf("invalid pdf version %d", majver)}
+
+	pdf.majver = majver
+	pdf.minver = minver
 
 	// second line
-	end_sl :=0
-	for i:=end_fl+1; i<len(buf); i++ {
+	endSl := -1
+	for i:=endFl+1; i<maxPos; i++ {
 		if (buf[i] == '\n') {
-			end_sl = i
+			endSl = i
 			break
 		}
 	}
+	if endSl == -1 {return fmt.Errorf("no eol in second line!")}
 
+	startSl := endFl +1
+	dif := endSl - startSl
+	if buf[endSl -1] == '\r' {dif--}
+	if dif != 4 {return fmt.Errorf(" no 4 chars after percent char %d %d!", startSl, endSl)}
 
-	if end_sl ==0 {
-		outstr += "// no eol in second line\n"
-		return outstr, fmt.Errorf("no eol in second line!")
+	for i:=startSl; i<startSl+4; i++ {
+		if !(buf[i] > 120) {return fmt.Errorf("char %q not valid in second top line!", buf[i])}
 	}
 
-	endSl := end_sl
-	if buf[end_sl -1] == '\r' {endSl = endSl-1}
-	outstr += string(buf[end_fl+1:endSl]) + "      // "
-
-	start_sl := 0
-	for i:=end_fl+ 1; i< endSl; i++ {
-		if buf[i] == '%' {
-			start_sl = i
-			break
-		}
-	}
-
-	if start_sl == 0 {
-		outstr += " No char % in second line\n"
-		return outstr, fmt.Errorf("no % starting second line!")
-	}
-
-	if (endSl - start_sl-1) != 4 {
-		outstr += fmt.Sprintf(" No 4 chars after percent: %d!\n", endSl - start_sl-1)
-		return outstr, fmt.Errorf(" no 4 chars after percent char %d %d!", endSl, start_sl)
-	}
-
-	for i:=start_sl + 1; i< endSl; i++ {
-		if !(buf[i] > 120) {
-			outstr += fmt.Sprintf(" char %q not valid!\n", buf[i])
-			return outstr, fmt.Errorf("error char %q not valid!", buf[i])
-		}
-	}
-
-	outstr += "second line valid!\n"
-
-	return outstr, nil
+	return nil
 }
 
-func (pdf *InfoPdf) parseLast3Lines(inbuf *[]byte)(outstr string, err error) {
+func (pdf *InfoPdf) parseLast3Lines()(err error) {
 
-	buf := *inbuf
+	buf := *pdf.buf
 
-	bufEnd := len(buf) -1
-//fmt.Printf("bufEnd: %d\n", bufEnd)
+	llEnd := len(buf) -1
+
 	// now we have the real last line which should contain %%EOF
-	llStart :=0
+	slEnd := -1
 
-	for i:=bufEnd; i>0; i-- {
+	for i:=llEnd; i>llEnd -8; i-- {
 		if buf[i] == '\n' {
-//fmt.Printf("ll %d: %s\n", i, string(buf[i+1:i+6]))
-			if string(buf[i+1:i+6]) == `%%EOF` {
-				llStart = i +1
-				break;
-			}
+			slEnd = i
+			break
 		}
 	}
 
-	llEnd := llStart + 5
+	if slEnd == -1 {return fmt.Errorf("cannot find eof for second top line")}
 
-	if llStart ==0 {
-		outstr = "// cannot find begin of last line!\n"
-		return outstr, fmt.Errorf("cannot find begin of last line!")
+	idx := bytes.Index(buf[slEnd+1:], []byte("%%EOF"))
+	if idx == -1 {return fmt.Errorf("last line: cannot find \"%%EOF\"!")}
+
+	//let see wether there is a second line with eof
+
+	sePos := slEnd - 500
+	if sePos < 0 {sePos = 10}
+	sidx := bytes.Index(buf[sePos:slEnd], []byte("%%EOF"))
+	if sidx > 0 {
+		fmt.Printf("found second \"%%EOF\"!")
+		slEnd = sidx -1
 	}
-
-	llstr := string(buf[llStart:llEnd])
-	outstr += llstr + "      // last line valid!\n"
 
 	//next we need to check second last line which should contain a int number
-	sl_end:=llStart -2
-	if buf[sl_end] == '\r' { sl_end --}
 
-	startxref_end :=0
-
-	for i:=sl_end; i>0; i-- {
+	tlEnd := -1
+	for i:=slEnd; i>slEnd -10; i-- {
 		if buf[i] == '\n' {
-			startxref_end = i
+			tlEnd = i
 			break
 		}
 	}
-	if startxref_end ==0 {
-		outstr += "// cannot find beginning of second to last line!\n"
-		return outstr, fmt.Errorf("cannot find beginning of second to last line!")
-	}
+	if tlEnd == -1 {return fmt.Errorf("cannot find eof for third top line")}
 
-	slstr := string(buf[startxref_end+1:sl_end+1])
-	xref, err := strconv.Atoi(slstr)
-	if err != nil {
-		outstr = slstr + fmt.Sprintf("     // cannot convert second last line %s to int: %v\n", slstr, err) + outstr
-		return outstr, fmt.Errorf("second last line not an int: %s", slstr)
-	}
-
-	outstr = slstr + fmt.Sprintf("       // second last line valid pointer to xref %d\n", xref) + outstr
-
-	//third last line
-	// the third last line should have the word "startxref"
-	tl_end := startxref_end -1
-
-	// if the string ends with two chars /r + /n instead of one char
-	if buf[tl_end -1] == '\r' {tl_end--}
-
-
-	startxref_start :=0
-
-	for i:=tl_end; i>0; i-- {
+	flEnd := -1
+	for i:=tlEnd; i>tlEnd -10; i-- {
 		if buf[i] == '\n' {
-			startxref_start = i+1
+			flEnd = i
 			break
 		}
 	}
-	if startxref_start ==0 {
-		outstr = "// cannot find beginning of third to last line!\n" + outstr
-		return outstr, fmt.Errorf("cannot find beginning to third last line!")
-	}
+	if flEnd == -1 {return fmt.Errorf("cannot find eof for fourth top line")}
 
+	idx = bytes.Index(buf[flEnd+1:], []byte("startxref"))
+	if idx == -1 {return fmt.Errorf("last line: cannot find \"statxref\"!")}
 
-	tlstr := string(buf[startxref_start:tl_end])
+	pdf.startxref = idx
 
-	if int(pdf.filSize) < xref {
-		outstr = tlstr + fmt.Sprintf(" //  startref points to invalid file location: %d file size: %d\n", xref, pdf.filSize ) + outstr
-		return outstr, fmt.Errorf("startref points to invalid file location ", tlstr)
-	}
+	xref:=0
+	_, err = fmt.Sscanf(string(buf[tlEnd+1:slEnd]),"%d", &xref)
+	if err != nil {return fmt.Errorf("cannot parse xref: %v!", err)}
+	pdf.xref = xref
 
-	xrefstr := string(buf[xref: (xref+4)])
-	if xrefstr != "xref" {
-		outstr = slstr + fmt.Sprintf(" // xref does not point to xref string in file: getting %d %s! \n", len(xrefstr), xrefstr) +outstr
-		return outstr, fmt.Errorf("xref pointer not pointing to xref: %s",slstr)
-	}
-
-//	fmt.Printf("third last line: %s\n", tlstr)
-	if tlstr != "startxref" {
-		outstr = tlstr + " //  third line from end does not contain \"startxref\" keyword!" + tlstr + "\n" + outstr
-		return outstr, fmt.Errorf("third line from end %s does not contain \"startxref\" keyword! ", tlstr)
-	}
-
-	pdf.startxref = startxref_start
-	outstr = tlstr + "  // valid third from end line\n" + outstr
-
-	return outstr, nil
+	return nil
 }
 
 func (pdf *InfoPdf) parseTrailer()(err error) {
@@ -465,7 +398,7 @@ func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
 			outstr += fmt.Sprintf("Size: could not parse Size value: %v", err)
 			return outstr, fmt.Errorf("could not parse Size value: %v", err)
 		}
-		pdf.sizeObj = size
+		pdf.objSize = size
 		outstr += fmt.Sprintf("  Size: %d parsed correctly\n", size)
 
 	case "Info":
@@ -496,6 +429,7 @@ func (pdf *InfoPdf) parseTrailCont(linStr string)(outstr string, err error) {
 	return outstr, nil
 }
 
+/*
 func (pdf *InfoPdf) getKVStr(instr string)(outstr string, err error) {
 
 	stPos := -1
@@ -590,77 +524,40 @@ func (pdf *InfoPdf) getKvMap(instr string)(kvMap map[string]string , err error) 
 
 	return kvMap, nil
 }
+*/
 
-func (pdf *InfoPdf) getStream(instr string)(outstr string, err error) {
+func (pdf *InfoPdf) getStream(objId int)(streamSl *[]byte, err error) {
 
 //fmt.Printf("******* getstream instr\n")
 //fmt.Println(instr)
 //fmt.Printf("******* end ***\n")
 
-	stPos := -1
-	endPos := 0
+	buf := *pdf.buf
+	obj := (*pdf.objList)[objId]
 
-//after stream there is a linefeed
-	for i:=0; i< len(instr); i++ {
-		if instr[i] == 's' {
-			if string(instr[i:i+6]) == "stream" {
-				stPos = i +7
-				break
-			}
-		}
-	}
+	if obj.streamSt < 0 {return nil, fmt.Errorf("no stream start found!")}
 
-	if stPos == -1 {return "", fmt.Errorf("no \"stream\" keyword found!")}
+	streamLen := obj.streamEnd -obj.streamSt
+	if streamLen < 1 {return nil, fmt.Errorf("no stream found!")}
 
-//	if instr[stPos +1] == '\n' {stPos = stPos +1}
+	if pdf.verb {fmt.Printf("**** stream [length: %d] ****\n", streamLen)}
 
-	for i:=stPos-1; i< stPos+2; i++ {
-//fmt.Printf("i %d: %q\n",i ,instr[i])
-	}
+	stbuf := buf[obj.streamSt:obj.streamEnd]
 
-	for i:=len(instr)-9; i> stPos; i-- {
-		if instr[i] == 'e' {
-			if string(instr[i:i+9]) == "endstream" {
-				endPos = i -1
-				break
-			}
-		}
-	}
+	bytStream := bytes.NewReader(stbuf)
 
-	if endPos == 0 {return "", fmt.Errorf("no \"endstream\" keyword found!")}
+	streamBuf := new(bytes.Buffer)
 
-	outstr = instr[stPos: endPos]
+	bytR, err := zlib.NewReader(bytStream)
+	if err != nil {return nil, fmt.Errorf("stream deflate error: %v", err)}
 
-fmt.Printf("stream len %d\n", len(outstr))
-	return outstr, nil
-}
+//	_ = copy(stream, bytR)
+	io.Copy(streamBuf, bytR)
 
+	bytR.Close()
 
-// parseRoot parses ROOT object and returns a map of the object properties
-func (pdf *InfoPdf) parseRootOld(instr string)(kvmap map[string]string, err error) {
-
-	kvmap, err = pdf.getKvMap(instr)
-	if err != nil {return kvmap, fmt.Errorf("parseRoot: cannot get kv pairs: %v", err)}
-
-	str, ok := kvmap["Type"]
-	if !ok {return kvmap, fmt.Errorf("parseRoot: no Type property in Root object!")}
-	if str != "/Catalog" {return kvmap, fmt.Errorf("parseRoot: type is not \"Catalog\": %s", str)}
-
-	str, ok = kvmap["Pages"]
-	if !ok {return kvmap, fmt.Errorf("parseRoot: no Pages property in Root object!")}
-
-	if len(str ) > 10 {return kvmap, fmt.Errorf("parseRoot: value of Pages object %s is too long: %d!", string(str[1:10]) + "...", len(str))}
-
-	pagesId :=0
-	val := 0
-	endStr :=""
-	_, err = fmt.Sscanf(str,"%d %d %s", &pagesId, &val, &endStr)
-	if err != nil {return kvmap, fmt.Errorf("parseRoot: cannot parse value %s of \"Pages\": %v", str, err)}
-
-	if (pagesId < 1) || (pagesId> pdf.numObj) {return kvmap, fmt.Errorf("parseRoot: Pages object id outside range: %d", pagesId + 1)}
-	pdf.pagesId = pagesId
-
-	return kvmap, nil
+	stream := streamBuf.Bytes()
+	return &stream, nil
 }
 
 func (pdf *InfoPdf) parseXref()(err error) {
@@ -765,7 +662,7 @@ func (pdf *InfoPdf) parseXref()(err error) {
 	return nil
 }
 
-
+/*
 func (pdf *InfoPdf) parseContent(instr string, pgNum int)(outstr string, err error) {
 
 fmt.Println("**** Content ***")
@@ -837,37 +734,6 @@ fmt.Println("***** end streamstr")
 	return outstr, nil
 }
 
-
-
-func (pdf *InfoPdf) convertEOL(filbuf []byte)(buf []byte) {
-
-	//test eol
-	for i:=0; i< 40; i++ {
-		if filbuf[i] == '\n' {
-			if filbuf[i-1] != '\r' {
-fmt.Println(" EOL has no cr!")
-				return filbuf
-			}
-		}
-	}
-
-	fmt.Println("EOL has cr! -- converting")
-	buf = make([]byte,pdf.filSize)
-
-	icount := 0
-	for i:=0; i< len(filbuf); i++ {
-		if filbuf[i] != '\r' {
-			buf[icount] = filbuf[i]
-			icount++
-		}
-	}
-
-
-	fmt.Printf("Size old: %d new: %d\n", len(filbuf), icount)
-//	fmt.Printf("last line: %s\n",
-	fmt.Printf("last line: %q %q %q\n", buf[icount-3], buf[icount -2], buf[icount-1])
-	return buf
-}
 
 func (pdf *InfoPdf) CheckPdf(textFile string)(err error) {
 
@@ -1123,6 +989,8 @@ fmt.Printf("******** page %d Obj %d *************\n%s\n**************end pageStr
 	return nil
 
 }
+*/
+
 
 func (pdf *InfoPdf) DecodePdf()(err error) {
 
@@ -1759,6 +1627,8 @@ func (pdf *InfoPdf) parsePage(iPage int)(err error) {
 
 	var pgobj pgObj
 
+	pgobj.pageNum = iPage
+
 	pgId := (*pdf.pageIds)[iPage]
 	buf := *pdf.buf
 	txtFil := pdf.txtFil
@@ -1932,7 +1802,7 @@ fmt.Println("**** Font: dictionary *****")
 	if fdictSt == -1 {
 fmt.Println("Resources: indirect obj")
 		valend := -1
-		for i:= valst; i< dictEnd; i++ {
+		for i:= fvalst; i< dictEnd; i++ {
 			if buf[i] == 'R' {
 				valend = i+1
 				break
@@ -2019,6 +1889,58 @@ fmt.Printf("GState Dict [%d: %d]: %s\n", gdictSt, gdictEnd, string(gDictByt))
 	if err != nil {return nil, fmt.Errorf("parsing font objs error: %v")}
 	reslist.gStates = gobjList
 
+	// find XObject
+fmt.Println("**** XObject: dictionary *****")
+	xidx := bytes.Index(dictByt, []byte("/XObject"))
+	if xidx == -1 {return nil, fmt.Errorf("cannot find keyword \"/XObject\"")}
+
+	xvalst := dictSt + xidx + len("/XObject")
+	xvalByt := buf[xvalst: dictEnd]
+//fmt.Printf("font valstr [%d:%d]: %s\n",fvalst, dictEnd, string(fontByt))
+
+	xdictSt := bytes.Index(xvalByt, []byte("<<"))
+//fmt.Printf("font dictSt: %d\n", fdictSt)
+
+	if xdictSt == -1 {
+fmt.Println("Resources: indirect obj")
+		xvalend := -1
+		for i:= xvalst; i< dictEnd; i++ {
+			if buf[i] == 'R' {
+				xvalend = i+1
+				break
+			}
+		}
+		if xvalend == -1 {return nil, fmt.Errorf("cannot find R for indirect obj of \"/XObject\"")}
+		inObjStr := string(buf[xvalst:xvalend])
+
+//fmt.Printf("ind obj: %s\n", inObjStr)
+
+		objId :=0
+		rev := 0
+		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+		if err != nil{return nil, fmt.Errorf("cannot parse %s as indirect obj of \"/XObject\": %v", inObjStr, err)}
+
+		fmt.Printf("Font indirect Obj Id: %d\n", objId)
+
+		return nil, nil
+	}
+
+
+	xdictEnd := bytes.Index(fontByt, []byte(">>"))
+	if xdictEnd == -1 {return nil, fmt.Errorf("no end brackets for xObj dict!")}
+
+	xdictSt += xvalst +2
+	xdictEnd += xvalst
+	xobjDictByt := buf[xdictSt:xdictEnd]
+
+fmt.Printf("XObj Dict [%d: %d]: %s\n", xdictSt, xdictEnd, string(xobjDictByt))
+
+	xobjList, err := pdf.parseIrefCol(&xobjDictByt)
+	if err != nil {return nil, fmt.Errorf("parsing xobj objs error: %v", err)}
+	reslist.xObjs = xobjList
+fmt.Printf("xobjs: %v reslist: %v\n",xobjList, reslist.xObjs)
+
+
 	// ProcSet
 fmt.Println("\n**** ProcSet: array *****")
 
@@ -2044,6 +1966,67 @@ fmt.Printf("ProcSet Array [%d: %d]: %s\n", parrSt, parrEnd, string(parrByt))
 	return &reslist, nil
 }
 
+
+func (pdf *InfoPdf) parseIObjRefList(keyname string, dictbyt *[]byte)(refList *[]objRef, err error) {
+
+	var keyDictByt []byte
+	fmt.Printf("**** %s: dictionary *****\n", keyname)
+
+	dictByt := *dictbyt
+	keyByt := []byte("/" + keyname)
+	fidx := bytes.Index(dictByt, []byte(keyByt))
+	if fidx == -1 {return nil, fmt.Errorf("cannot find keyword \"/%s\"",keyname)}
+
+	dictEnd := len(dictByt)
+	fvalst := fidx + len(keyByt)
+	valByt := dictByt[fvalst: dictEnd]
+//fmt.Printf("font valstr [%d:%d]: %s\n",fvalst, dictEnd, string(fontByt))
+
+	fdictSt := bytes.Index(valByt, []byte("<<"))
+//fmt.Printf("font dictSt: %d\n", fdictSt)
+
+	if fdictSt == -1 {
+fmt.Println("Resources: indirect obj")
+		fvalend := -1
+		for i:= fvalst; i< dictEnd; i++ {
+			if valByt[i] == 'R' {
+				fvalend = i+1
+				break
+			}
+		}
+		if fvalend == -1 {return nil, fmt.Errorf("cannot find R for indirect obj of \"/%s\"", keyname)}
+		inObjStr := string(dictByt[fvalst:fvalend])
+
+fmt.Printf("ind obj: %s\n", inObjStr)
+
+		objId :=0
+		rev := 0
+		_, err = fmt.Sscanf(inObjStr,"%d %d R", &objId, &rev)
+		if err != nil{return nil, fmt.Errorf("cannot parse %s as indirect obj of \"/%s\": %v", inObjStr, keyname, err)}
+
+		fmt.Printf("%s indirect Obj Id: %d\n", keyname, objId)
+		objSl, err := pdf.getObjCont(objId)
+		if err != nil{return nil, fmt.Errorf("cannot get content of obj %d: %v", objId, err)}
+
+		keyDictByt = *objSl
+
+	} else {
+
+		fdictEnd := bytes.Index(valByt, []byte(">>"))
+		if fdictEnd == -1 {return nil, fmt.Errorf("no end brackets for dict of %s!", keyname)}
+
+		fdictSt += fvalst +2
+		fdictEnd += fvalst
+		keyDictByt = valByt[fdictSt:fdictEnd]
+	}
+
+fmt.Printf("%s key Dict: %s\n", keyname, string(keyDictByt))
+
+	objList, err := pdf.parseIrefCol(&keyDictByt)
+	if err != nil {return nil, fmt.Errorf("%s parsing ref objs error: %v", keyname, err)}
+
+	return objList, nil
+}
 
 func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 
@@ -2099,6 +2082,19 @@ func (pdf *InfoPdf) parseIrefCol(inbuf *[]byte)(refList *[]objRef, err error) {
 
 
 	return &reflist, nil
+}
+
+//obj
+func (pdf *InfoPdf) getObjCont(objId int)(objSlice *[]byte, err error) {
+
+	if objId > pdf.numObj {return nil, fmt.Errorf("objIs %d is not valid!", objId)}
+
+	buf := *pdf.buf
+	obj := (*pdf.objList)[objId]
+
+	objByt := buf[obj.contSt:obj.contEnd]
+
+	return &objByt, nil
 }
 
 func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
@@ -2467,6 +2463,7 @@ fmt.Printf("fonts: %v\n", pdf.fonts)
 func (pdf *InfoPdf) PrintPage(iPage int) {
 		pgobj := (*pdf.pageList)[iPage]
 		fmt.Printf("****************** Page %d *********************\n", iPage + 1)
+		fmt.Printf("Page Number:     %d\n", pgobj.pageNum)
 		fmt.Printf("Contents Obj Id: %d\n", pgobj.contentId)
 		fmt.Printf("Media Box: ")
 		if pgobj.mediabox == nil {
