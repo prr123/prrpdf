@@ -196,6 +196,7 @@ func (pdf *InfoPdf) parseTopTwoLines()(err error) {
 	pdf.minver = minver
 
 	// second line
+
 	endSl := -1
 	for i:=endFl+1; i<maxPos; i++ {
 		if (buf[i] == '\n') {
@@ -208,9 +209,11 @@ func (pdf *InfoPdf) parseTopTwoLines()(err error) {
 	startSl := endFl +1
 	dif := endSl - startSl
 	if buf[endSl -1] == '\r' {dif--}
-	if dif != 4 {return fmt.Errorf(" no 4 chars after percent char %d %d!", startSl, endSl)}
+//fmt.Printf("2 line: %s\n", string(buf[endFl+1:endSl]))
 
-	for i:=startSl; i<startSl+4; i++ {
+	if dif != 5 {return fmt.Errorf(" no 4 chars after percent char %d:%d!", startSl, endSl)}
+
+	for i:=startSl+1; i<startSl+5; i++ {
 		if !(buf[i] > 120) {return fmt.Errorf("char %q not valid in second top line!", buf[i])}
 	}
 
@@ -1186,9 +1189,14 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	pdf.objStart = nextPos
 
 	outstr += txtstr + "\n"
-
 	txtFil.WriteString("********* first two lines ***********\n")
 	txtFil.WriteString(outstr)
+
+	err = pdf.parseTopTwoLines()
+	if err != nil {return fmt.Errorf("parseTopTwoLines: %v", err)}
+	outstr = "parsed top two lines successfully\n"
+	txtFil.WriteString(outstr)
+	fmt.Printf("%s", outstr)
 //fmt.Printf("**** first two lines ***\n%s\n",outstr)
 
 	// read last three lines
