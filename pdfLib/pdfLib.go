@@ -247,35 +247,27 @@ func (pdf *InfoPdf) parseLast3Lines()(err error) {
 	if sePos < 0 {sePos = 10}
 	sidx := bytes.Index(buf[sePos:slEnd], []byte("%%EOF"))
 	if sidx > 0 {
-		fmt.Printf("found second \"%%EOF\"!")
-		slEnd = sidx -1
+		fmt.Printf("found second \"%%EOF\"!\n")
+		slEnd = sePos + sidx -1
 	}
 
 	//next we need to check second last line which should contain a int number
 
 	tlEnd := -1
-	for i:=slEnd; i>slEnd -10; i-- {
+	for i:=slEnd-15; i<slEnd; i++ {
 		if buf[i] == '\n' {
 			tlEnd = i
 			break
 		}
 	}
+//fmt.Printf("tlEnd search: %s\n", string(buf[slEnd-15:slEnd]))
 	if tlEnd == -1 {return fmt.Errorf("cannot find eof for third top line")}
 
-	flEnd := -1
-	for i:=tlEnd; i>tlEnd -10; i-- {
-		if buf[i] == '\n' {
-			flEnd = i
-			break
-		}
-	}
-	if flEnd == -1 {return fmt.Errorf("cannot find eof for fourth top line")}
+	idx = bytes.Index(buf[tlEnd - 50:tlEnd], []byte("startxref"))
+	if idx == -1 {return fmt.Errorf("last line: cannot find \"startxref\"!")}
 
-	idx = bytes.Index(buf[flEnd+1:], []byte("startxref"))
-	if idx == -1 {return fmt.Errorf("last line: cannot find \"statxref\"!")}
-
-	pdf.startxref = idx
-
+	pdf.startxref = idx + tlEnd - 50
+//fmt.Printf("startxref: %s\n", string(buf[pdf.startxref:tlEnd]))
 	xref:=0
 	_, err = fmt.Sscanf(string(buf[tlEnd+1:slEnd]),"%d", &xref)
 	if err != nil {return fmt.Errorf("cannot parse xref: %v!", err)}
@@ -1199,8 +1191,14 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	fmt.Printf("%s", outstr)
 //fmt.Printf("**** first two lines ***\n%s\n",outstr)
 
-	// read last three lines
+	err = pdf.parseLast3Lines()
+	if err != nil {return fmt.Errorf("parseLast3Lines: %v", err)}
+	outstr = "parsed last three lines successfully\n"
+	txtFil.WriteString(outstr)
+	fmt.Printf("%s", outstr)
 
+/*
+	// read last three lines
 	txtFil.WriteString("******** last three lines ***********\n")
 	bufLen := len(buf)
 	outstr = ""
@@ -1323,7 +1321,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 // after checking for multiple endings we can parse the correct trailer section
 parseTrailer:
 	//trailer
-
+*/
 	txtFil.WriteString("******** trailer ***********\n")
 
 	outstr = ""
@@ -2437,7 +2435,7 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Printf("Objects: %5d    First Object Start Pos: %2d\n", pdf.numObj, pdf.objStart)
 	fmt.Println("*****************************************************************")
 
-	if *pdf.objList == nil {
+	if pdf.objList == nil {
 		fmt.Println("objlist is nil!")
 		return
 	}
@@ -2452,7 +2450,7 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Println()
 
 	fmt.Println("*********** sequential Obj List *********************")
-	if *pdf.objList == nil {
+	if pdf.objList == nil {
 		fmt.Println("rdObjlist is nil!")
 		return
 	}
