@@ -1651,7 +1651,7 @@ func (pdf *InfoPdf) parsePage(iPage int)(err error) {
 	var pgobj pgObj
 //	buf := *pdf.buf
 
-	pgobj.pageNum = iPage
+	pgobj.pageNum = iPage + 1
 
 	//determine the object id for page iPage
 	pgobjId := (*pdf.pageIds)[iPage]
@@ -2381,6 +2381,8 @@ func (pdf *InfoPdf) PrintPdf() {
 	fmt.Printf("File Name: %s\n", pdf.filNam)
 	fmt.Printf("File Size: %d\n", pdf.filSize)
 	fmt.Println()
+
+	fmt.Printf("pdf version: major %d minor %d\n",pdf.majver, pdf.minver)
 
 	fmt.Printf("Page Count: %3d\n", pdf.pageCount)
 	if pdf.mediabox == nil {
