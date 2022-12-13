@@ -1133,6 +1133,17 @@ fmt.Println("\n*** parse Pdf Tree ***")
 
 func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 // method that decodes pdf file to text
+// parsing sequence
+// Step 1: top 2 lines
+// Step 2: last 3 lines
+// Step 3: trailer section
+// Step 4: xref section
+// Step 5: objs
+// Step 6: parseInfo
+// Step 6: parseRoot
+// Step 7: parsePages
+// Step 8: for each page: parsePage
+// Step 9: for each page: parseContent
 
 	var outstr string
 
@@ -1143,19 +1154,12 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	pdf.txtFil = txtFil
 
 	buf := make([]byte,pdf.filSize)
+	pdf.buf = &buf
 
 	_, err = (pdf.fil).Read(buf)
 	if err != nil {return fmt.Errorf("error Read: %v", err)}
 
-	pdf.buf = &buf
 
-	// parsing sequence
-	// Step 1: top 2 lines
-	// Step 2: last 3 lines
-	// Step 3: trailer section
-	// Step 4: xref section
-	// Step 5: objs
-	//
 
 	//read first line
 	txtstr, nextPos, err := pdf.readLine(0)
@@ -2489,6 +2493,14 @@ fmt.Printf("fonts: %v\n", pgobj.fonts)
 			fmt.Println("-- ExtGstate Ids:")
 			for i:=0; i< len(*pgobj.gStates); i++ {
 				fmt.Printf("   %s %d\n", (*pgobj.gStates)[i].Nam, (*pgobj.gStates)[i].Id)
+			}
+		}
+		if pgobj.xObjs == nil {
+			fmt.Println("-- no XObjects")
+		} else {
+			fmt.Println("-- XObject Ids:")
+			for i:=0; i< len(*pgobj.xObjs); i++ {
+				fmt.Printf("   %s %d\n", (*pgobj.xObjs)[i].Nam, (*pgobj.xObjs)[i].Id)
 			}
 		}
 		fmt.Println("**********************************************")
