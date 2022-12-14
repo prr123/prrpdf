@@ -2365,6 +2365,59 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return outstr, nil
 }
 
+func (pdf *InfoPdf) parseName(keyword string, obj pdfObj)(outstr string, err error) {
+
+	buf := *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("Kids: %s\n",string(objByt))
+
+	keyByt := []byte("/" + keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return "", fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	opSt := -1
+	opEnd := -1
+
+fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+	endByt := []byte{'\n', '\r', '/'}
+
+	istate := 0
+	for i:= idx + len(keyByt); i< len(objByt); i++ {
+		switch istate {
+		case 0:
+			if objByt[i] == '/' {opSt = i;istate =1}
+
+		case 1:
+			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+
+		default:
+		}
+		if istate > 1 {break}
+	}
+
+	switch istate {
+	case 0:
+		return "", fmt.Errorf("no open '/' found!")
+	case 1:
+		opEnd = len(objByt)
+	case 2:
+		if opEnd -1 < opSt +1 {return "", fmt.Errorf("inverted string [%d:%d]",opSt+1, opEnd-1)}
+
+	default:
+		return "", fmt.Errorf("unknown istate %d!", istate)
+	}
+
+	valBuf := objByt[opSt:opEnd]
+
+fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+
+	_, err = fmt.Sscanf(string(valBuf), "/%s", &outstr)
+	if err != nil {return "", fmt.Errorf("cannot parse string: %v", err)}
+
+	return outstr, nil
+}
+
 func parseIndObjRef(valByt []byte) (objId int) {
 // function parses ValByt to find object reference
 // if no obj id found return obj Id = -1
