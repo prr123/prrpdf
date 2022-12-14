@@ -64,10 +64,11 @@ type InfoPdf struct {
 	pageList *[]pgObj
 	objList *[]pdfObj
 	rdObjList *[]pdfObj
+	fontList *[]fontObj
+	gStateList *[]gStateObj
 	fonts *[]objRef
 	gStates *[]objRef
 	xObjs *[]objRef
-	fontAux *[]fontAuxObj
 	mediabox *[4]float32
 	test bool
 	verb bool
@@ -90,6 +91,7 @@ type pdfObj struct {
 }
 
 type pgObj struct {
+	id int
 	pageNum int
 	mediabox *[4]float32
 	contentId int
@@ -100,7 +102,6 @@ type pgObj struct {
 	fonts *[]objRef
 	gStates *[]objRef
 	xObjs *[]objRef
-	fontAux *[]fontAuxObj
 }
 
 type objRef struct {
@@ -108,15 +109,40 @@ type objRef struct {
 	Nam string
 }
 
-type fontAuxObj struct {
-	fontDesc int
+type fontObj struct {
+	id int
+	fontDesc *FontDesc
+	fontDescId int
+	subtyp string
 	name string
-	typ int
-	glNum int
+	base string
+	encode string
+	desc int
+	fchar int
+	lchar int
+	widths int
+	widthList *[]int
 }
 
-type gObj struct {
-	gObjItem  objRef
+type FontDesc struct {
+	id int
+	fname string
+	flags int
+	italic int
+	ascent int
+	descent int
+	capheight int
+	avgwidth	int
+	maxwidth	int
+	fontweight	int
+	Xheight int
+	fontBox [4]int
+	fileId int
+}
+
+type gStateObj struct {
+	BM string
+
 }
 
 type resourceList struct {
@@ -882,7 +908,11 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 // Step 7: parsePages
 // Step 8: for each page: parsePage
 // Step 9: for each page: parseContent
-
+// Step 10: parse each Font object
+// Step 11: parse each related FontDescriptor object
+// Step 12: parse each gstate object
+// Step 13: parse each xobject object
+//
 	var outstr string
 
 	txtFil, err := os.Create(txtfil)
@@ -1081,7 +1111,7 @@ fmt.Println()
 
 		fmt.Println()
 	}
-
+//xxx
 	return nil
 }
 
@@ -2022,6 +2052,36 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return outstr, nil
 }
 
+func (pdf *InfoPdf) parsedict(keyword string, objByt []byte)(dict *[]byte, err error) {
+
+	var nestSt, nestEnd [10]int
+
+	keyByt := []byte(keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return nil, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
+
+	nestlev := 0
+	for i:= idx + len(keyByt); i< len(valByt) -1; i++ {
+		if valByt[i] == '<' && valByt[i+1] == '<' {
+			nestSt[nestlev] = i
+			nestlev++
+			if nestlev > 10 {return nil, fmt.Errorf("nesting level exceeds 10!")}
+		}
+		if valByt[i] == '>' && valByt[i+1] == '>' {
+			nestlev--
+			nestEnd[nestlev] = i
+			break
+		}
+	}
+
+	dictByt := valByt[nestSt[0]:nestEnd[0]]
+	return &dictByt, nil
+}
+
 func parseIndObjRef(valByt []byte) (objId int) {
 // function parses ValByt to find object reference
 // if no obj id found return obj Id = -1
@@ -2067,6 +2127,11 @@ func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 
 
 func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
+// method parses an object to determine dict start/end stream start/end and object type
+
+	fCount :=0
+	gCount :=0
+	xObjCount :=0
 
 	obj := (*pdf.objList)[objId]
 	if obj.start == 0 {
@@ -2135,6 +2200,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 //fmt.Printf("obj %d dict after (<<>>) [%d:%d]: %s\n", objId, obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
 
+// todo rep
 	// check type
 	ipos = bytes.Index(objByt, []byte("/Type"))
 	if ipos == -1 {goto endParse}
@@ -2152,7 +2218,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 	for i:= valst+1; i< len(objByt); i++ {
 		switch objByt[i] {
-		case '/', '\r', '\n':
+		case '/', '\r', '\n', ' ':
 			valend = i
 		default:
 		}
@@ -2162,8 +2228,14 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
 	obj.typstr = string(objByt[(valst +1):valend])
 //fmt.Printf("obj: %d valstr [%d:%d]: %s\n", objId, valst, valend, obj.typstr)
-
-
+	switch obj.typstr {
+	case "Font":
+		fCount++
+	case "ExtGState":
+		gCount++
+	case "XObject":
+		xObjCount++
+	}
 	(*pdf.objList)[objId] = obj
 
 	endParse:
