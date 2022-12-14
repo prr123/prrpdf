@@ -50,7 +50,6 @@ type InfoPdf struct {
 	buf *[]byte
 	filSize int64
 	filNam string
-//	sizeObj int
 	objSize int
 	numObj int
 	pageCount int
@@ -81,7 +80,6 @@ type pdfObj struct {
 	dict bool
 	array bool
 	simple bool
-	names *[]string
 	parent int
 	start int
 	end int
@@ -131,8 +129,6 @@ type pdfDoc struct {
 	pageType int
 
 }
-
-
 
 func Init()(info *InfoPdf) {
 	var pdf InfoPdf
@@ -326,10 +322,8 @@ func (pdf *InfoPdf) parseTrailer()(err error) {
 	if err != nil {return fmt.Errorf("parse Size Obj error: %v!", err)}
 	pdf.numObj = objId
 
-
 	return nil
 }
-
 
 
 func (pdf *InfoPdf) parseObjRef(key string, Start int, Type int)(objId int, err error) {
@@ -2215,6 +2209,8 @@ func (pdf *InfoPdf) parseMbox(obj pdfObj)(mBox *[4]float32, err error) {
 
 func (pdf *InfoPdf) parseInt(keyword string, obj pdfObj)(num int, err error) {
 
+	var indObj pdfObj
+
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
 //fmt.Printf("Kids: %s\n",string(objByt))
@@ -2233,28 +2229,13 @@ func (pdf *InfoPdf) parseInt(keyword string, obj pdfObj)(num int, err error) {
 fmt.Printf("valstr: %s\n", string(valByt))
 
 	// whether indirect obj
-	indObjEnd := -1
-	for i:= valst; i< obj.contEnd; i++ {
-		if objByt[i] == 'R' {
-			indObjEnd = i
-			break
-		}
-	}
+	inObjId := parseIndObjRef(objByt[valst:])
+	// todo make sure inObjIs is valid
 
-	if indObjEnd >  -1 {
-fmt.Printf("looking for indObj: %s\n", string(objByt[valst:indObjEnd+1]))
-		indObjId :=0
-		rev := 0
-		if indObjEnd > -1 {
-			_, err = fmt.Sscanf(string(objByt[valst:indObjEnd+1]),"%d %d R", &indObjId, &rev)
-			if err == nil {
-				indObj := (*pdf.objList)[indObjId]
-				valByt = buf[indObj.contSt:indObj.contEnd]
-			}
-		}
-	}
+	if inObjId > -1 {indObj = (*pdf.objList)[inObjId]}
+	valByt = buf[indObj.contSt: indObj.contEnd]
 
-fmt.Printf("parse num obj str: %s\n", string(objByt))
+fmt.Printf("parse num obj str: %s\n", string(valByt))
 
 	endByt := []byte{'\n', '\r', '/', ' '}
 
@@ -2285,7 +2266,7 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return num, nil
 }
 
-func (pdf *InfoPdf) parsefloat(keyword string, obj pdfObj)(fnum float32, err error) {
+func (pdf *InfoPdf) parseFloat(keyword string, obj pdfObj)(fnum float32, err error) {
 
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
@@ -2384,6 +2365,23 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return outstr, nil
 }
 
+func parseIndObjRef(valByt []byte) (objId int) {
+// function parses ValByt to find object reference
+// if no obj id found return obj Id = -1
+	valEnd := -1
+	for i:=0; i< len(valByt); i++ {
+		if valByt[i] == 'R' {
+			valEnd = i
+			break
+		}
+	}
+	if valEnd == -1 {return -1}
+
+	ref :=0
+	_, err:= fmt.Sscanf(string(valByt[:valEnd+1]),"%d %d R", &objId, &ref)
+	if err != nil {return -2}
+	return objId
+}
 
 func isEnding (b byte, ending []byte)(end bool) {
 
@@ -2398,7 +2396,6 @@ func isEnding (b byte, ending []byte)(end bool) {
 	return true
 }
 
-//eee
 func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 
 	buf:= *pdf.buf
@@ -2411,29 +2408,6 @@ func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 	return ipos
 }
 
-func (pdf *InfoPdf) findVal(start, end int)(ipos int) {
-
-	ipos = end
-	buf:= *pdf.buf
-	objByt := buf[start:end]
-
-fmt.Printf("find val:%s \n", string(objByt))
-
-	for i:=0; i< len(objByt); i++ {
-		if objByt[i] == '/' {
-			ipos = i
-			break
-		}
-		if objByt[i] == '\n' || objByt[i] =='\r' {
-			ipos = i
-			break
-		}
-	}
-
-fmt.Printf("find val end pos:%d \n", ipos)
-
-	return ipos
-}
 
 func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 
