@@ -1349,62 +1349,10 @@ fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.co
 	if err != nil {return fmt.Errorf("parseName error parsing value of %s: %v",key, err)}
 	fmt.Printf("%s: %s\n", key, filtStr)
 
-/*
-	idx := bytes.Index(dictByt, []byte(key))
-	if idx == -1 {return fmt.Errorf("no keyword \"%s\" found!", key)}
-
-	istate :=0
-	posSt := -1
-	posEnd := -1
-fmt.Printf("dicByt val: %s\n", string(dictByt[idx+len(key):]))
-	for i:=idx + len(key); i< len(dictByt); i++ {
-		switch istate {
-		case 0:
-			if dictByt[i] == '/' {istate++; posSt=i}
-		case 1:
-			if dictByt[i] =='/' || dictByt[i] == ' ' {posEnd = i}
-			if dictByt[i] =='\r' || dictByt[i] == '\n' {posEnd = i}
-		default:
-		}
-		if posEnd > -1 {break}
-	}
-	if posSt == -1 {return fmt.Errorf("keyword %s has no value!", key)}
-	if posEnd == -1 {posEnd = len(dictByt)}
-
-	valstr := dictByt[posSt:posEnd]
-
-	fmt.Printf("%s: %s\n", key, valstr)
-*/
 	key = "/Length"
 	streamLen, err := pdf.parseInt(key, dictByt)
 	if err != nil {return fmt.Errorf("parseInt error: parsing value of %s: %v",key, err)}
 	fmt.Printf("%s: %d\n", key, streamLen)
-
-/*
-	idx = bytes.Index(dictByt, []byte(key))
-	if idx == -1 {return fmt.Errorf("no keyword \"%s\" found!", key)}
-
-	istate =0
-	posSt = -1
-	posEnd = -1
-fmt.Printf("dictByt val: %s\n", string(dictByt[idx+ len(key):]))
-	for i:=idx + len(key); i< len(dictByt); i++ {
-		switch istate {
-		case 0:
-			if dictByt[i] == ' ' {istate++; posSt=i}
-		case 1:
-			if dictByt[i] =='/' || dictByt[i] == ' ' {posEnd = i}
-			if dictByt[i] =='\r' || dictByt[i] == '\n' {posEnd = i}
-		default:
-		}
-		if posEnd > -1 {break}
-	}
-	if posSt == -1 {return fmt.Errorf("keyword %s has no value!", key)}
-	if posEnd == -1 {posEnd = len(dictByt)}
-
-	valstr = dictByt[posSt:posEnd]
-*/
-
 
 	return nil
 }
