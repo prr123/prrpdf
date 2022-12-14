@@ -1074,7 +1074,7 @@ fmt.Println()
 
 		fmt.Printf("\n***** parsing Content of Page %d *******\n", ipg+1)
 		err = pdf.parsePageContent(ipg)
-		if err != nil {return fmt.Errorf("parsePageContent %d: %v",ipg, err)}
+		if err != nil {return fmt.Errorf("parsePageContent page %d: %v",ipg+1, err)}
 		outstr = fmt.Sprintf("parsed Content successfully!")
 		txtFil.WriteString(outstr +"\n")
 		fmt.Printf("****** %s ********\n", outstr)
@@ -1377,7 +1377,7 @@ fmt.Printf("dicByt val: %s\n", string(dictByt[idx+len(key):]))
 */
 	key = "/Length"
 	streamLen, err := pdf.parseInt(key, dictByt)
-	if err != nil {return fmt.Errorf("parseInt error parsing value of %s: %v",key, err)}
+	if err != nil {return fmt.Errorf("parseInt error: parsing value of %s: %v",key, err)}
 	fmt.Printf("%s: %d\n", key, streamLen)
 
 /*
@@ -1864,7 +1864,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 		valByt = buf[indObj.contSt: indObj.contEnd]
 	}
 
-fmt.Printf("parse num obj str: %s\n", string(valByt))
+fmt.Printf("parse num obj valByt: %s\n", string(valByt))
 
 	endByt := []byte{'\n', '\r', '/', ' '}
 
@@ -1872,10 +1872,10 @@ fmt.Printf("parse num obj str: %s\n", string(valByt))
 	for i:= 0; i< len(valByt); i++ {
 		switch istate {
 		case 0:
-			if util.IsNumeric(objByt[i]) {opSt = i;istate =1}
+			if util.IsNumeric(valByt[i]) {opSt = i;istate =1}
 
 		case 1:
-			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+			if isEnding(valByt[i], endByt) {opEnd= i; istate =2}
 
 		default:
 		}
@@ -1883,7 +1883,7 @@ fmt.Printf("parse num obj str: %s\n", string(valByt))
 	}
 
 	if istate == 0 {return -1, fmt.Errorf("no number found!")}
-	if istate == 1 {opEnd = len(objByt)}
+	if istate == 1 {opEnd = len(valByt)}
 
 	valBuf := valByt[opSt:opEnd]
 
@@ -1926,13 +1926,13 @@ fmt.Printf("parse float obj str: %s\n", string(valByt))
 	endByt := []byte{'\n', '\r', '/', ' '}
 
 	istate := 0
-	for i:= idx + len(keyByt); i< len(objByt); i++ {
+	for i:= idx + len(keyByt); i< len(valByt); i++ {
 		switch istate {
 		case 0:
-			if util.IsNumeric(objByt[i]) {opSt = i;istate =1}
+			if util.IsNumeric(valByt[i]) {opSt = i;istate =1}
 
 		case 1:
-			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+			if isEnding(valByt[i], endByt) {opEnd= i; istate =2}
 
 		default:
 		}
@@ -1940,9 +1940,10 @@ fmt.Printf("parse float obj str: %s\n", string(valByt))
 	}
 
 	if istate == 0 {return -1, fmt.Errorf("no number found!")}
-	if istate == 1 {opEnd = len(objByt)}
+	if istate == 1 {opEnd = len(valByt)}
 
-	valBuf := buf[opSt:opEnd]
+	valBuf := valByt[opSt:opEnd]
+
 
 fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
@@ -1981,15 +1982,15 @@ fmt.Printf("valstr: %s\n", string(valByt))
 	endByt := []byte{'\n', '\r', '/'}
 
 	istate := 0
-	for i:= idx + len(keyByt); i< len(objByt); i++ {
+	for i:= idx + len(keyByt); i< len(valByt); i++ {
 		switch istate {
 		case 0:
-			if objByt[i] == '(' {opSt = i;istate =1}
+			if valByt[i] == '(' {opSt = i;istate =1}
 
 		case 1:
-			if objByt[i] == ')' {opEnd = i;istate =2}
+			if valByt[i] == ')' {opEnd = i;istate =2}
 
-			if isEnding(objByt[i], endByt) {opEnd= i; istate =3}
+			if isEnding(valByt[i], endByt) {opEnd= i; istate =3}
 
 		default:
 		}
@@ -2008,7 +2009,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 		return "", fmt.Errorf("unknown istate %d!", istate)
 	}
 
-	valBuf := buf[opSt+1:opEnd -1]
+	valBuf := valByt[opSt+1:opEnd -1]
 
 fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
@@ -2038,13 +2039,13 @@ fmt.Printf("valstr: %s\n", string(valByt))
 	endByt := []byte{'\n', '\r', '/'}
 
 	istate := 0
-	for i:= idx + len(keyByt); i< len(objByt); i++ {
+	for i:= idx + len(keyByt); i< len(valByt); i++ {
 		switch istate {
 		case 0:
-			if objByt[i] == '/' {opSt = i;istate =1}
+			if valByt[i] == '/' {opSt = i;istate =1}
 
 		case 1:
-			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+			if isEnding(valByt[i], endByt) {opEnd= i; istate =2}
 
 		default:
 		}
@@ -2055,7 +2056,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 	case 0:
 		return "", fmt.Errorf("no open '/' found!")
 	case 1:
-		opEnd = len(objByt)
+		opEnd = len(valByt)
 	case 2:
 		if opEnd -1 < opSt +1 {return "", fmt.Errorf("inverted string [%d:%d]",opSt+1, opEnd-1)}
 
@@ -2063,7 +2064,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 		return "", fmt.Errorf("unknown istate %d!", istate)
 	}
 
-	valBuf := objByt[opSt:opEnd]
+	valBuf := valByt[opSt:opEnd]
 
 fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
