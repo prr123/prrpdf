@@ -2213,6 +2213,191 @@ func (pdf *InfoPdf) parseMbox(obj pdfObj)(mBox *[4]float32, err error) {
 }
 
 
+func (pdf *InfoPdf) parseInt(keyword string, obj pdfObj)(num int, err error) {
+
+	buf := *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("Kids: %s\n",string(objByt))
+
+	keyByt := []byte("/" + keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return -1, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	opSt := -1
+	opEnd := -1
+
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
+
+fmt.Printf("valstr: %s\n", string(valByt))
+
+	// whether indirect obj
+	indObjEnd := -1
+	for i:= valst; i< obj.contEnd; i++ {
+		if objByt[i] == 'R' {
+			indObjEnd = i
+			break
+		}
+	}
+
+	if indObjEnd >  -1 {
+fmt.Printf("looking for indObj: %s\n", string(objByt[valst:indObjEnd+1]))
+		indObjId :=0
+		rev := 0
+		if indObjEnd > -1 {
+			_, err = fmt.Sscanf(string(objByt[valst:indObjEnd+1]),"%d %d R", &indObjId, &rev)
+			if err == nil {
+				indObj := (*pdf.objList)[indObjId]
+				valByt = buf[indObj.contSt:indObj.contEnd]
+			}
+		}
+	}
+
+fmt.Printf("parse num obj str: %s\n", string(objByt))
+
+	endByt := []byte{'\n', '\r', '/', ' '}
+
+	istate := 0
+	for i:= 0; i< len(valByt); i++ {
+		switch istate {
+		case 0:
+			if util.IsNumeric(objByt[i]) {opSt = i;istate =1}
+
+		case 1:
+			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+
+		default:
+		}
+		if istate == 2 {break}
+	}
+
+	if istate == 0 {return -1, fmt.Errorf("no number found!")}
+	if istate == 1 {opEnd = len(objByt)}
+
+	valBuf := valByt[opSt:opEnd]
+
+fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+
+	_, err = fmt.Sscanf(string(valBuf), "%d", &num)
+	if err != nil {return -1, fmt.Errorf("cannot parse num: %v", err)}
+
+	return num, nil
+}
+
+func (pdf *InfoPdf) parsefloat(keyword string, obj pdfObj)(fnum float32, err error) {
+
+	buf := *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("Kids: %s\n",string(objByt))
+
+	keyByt := []byte("/" + keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return -1.0, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	opSt := -1
+	opEnd := -1
+
+fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+	endByt := []byte{'\n', '\r', '/', ' '}
+
+	istate := 0
+	for i:= idx + len(keyByt); i< len(objByt); i++ {
+		switch istate {
+		case 0:
+			if util.IsNumeric(objByt[i]) {opSt = i;istate =1}
+
+		case 1:
+			if isEnding(objByt[i], endByt) {opEnd= i; istate =2}
+
+		default:
+		}
+		if istate == 2 {break}
+	}
+
+	if istate == 0 {return -1, fmt.Errorf("no number found!")}
+	if istate == 1 {opEnd = len(objByt)}
+
+	valBuf := buf[opSt:opEnd]
+
+fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+
+	_, err = fmt.Sscanf(string(valBuf), "%f", &fnum)
+	if err != nil {return -1, fmt.Errorf("cannot parse fnum: %v", err)}
+
+	return fnum, nil
+}
+
+func (pdf *InfoPdf) parseString(keyword string, obj pdfObj)(outstr string, err error) {
+
+	buf := *pdf.buf
+	objByt := buf[obj.contSt:obj.contEnd]
+//fmt.Printf("Kids: %s\n",string(objByt))
+
+	keyByt := []byte("/" + keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return "", fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	opSt := -1
+	opEnd := -1
+
+fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+	endByt := []byte{'\n', '\r', '/'}
+
+	istate := 0
+	for i:= idx + len(keyByt); i< len(objByt); i++ {
+		switch istate {
+		case 0:
+			if objByt[i] == '(' {opSt = i;istate =1}
+
+		case 1:
+			if objByt[i] == ')' {opEnd = i;istate =2}
+
+			if isEnding(objByt[i], endByt) {opEnd= i; istate =3}
+
+		default:
+		}
+		if istate > 1 {break}
+	}
+
+	switch istate {
+	case 0:
+		return "", fmt.Errorf("no open '(' found!")
+	case 1, 3:
+		return "", fmt.Errorf("no open ')' found!")
+	case 2:
+		if opEnd -1 < opSt +1 {return "", fmt.Errorf("inverted string [%d:%d]",opSt+1, opEnd-1)}
+
+	default:
+		return "", fmt.Errorf("unknown istate %d!", istate)
+	}
+
+	valBuf := buf[opSt+1:opEnd -1]
+
+fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+
+	_, err = fmt.Sscanf(string(valBuf), "%s", &outstr)
+	if err != nil {return "", fmt.Errorf("cannot parse string: %v", err)}
+
+	return outstr, nil
+}
+
+
+func isEnding (b byte, ending []byte)(end bool) {
+
+	idx := -1
+	for i:=0; i<len(ending); i++ {
+		if ending[i] == b {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {return false}
+	return true
+}
+
 //eee
 func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 
