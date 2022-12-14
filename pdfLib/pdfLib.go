@@ -1344,6 +1344,12 @@ fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.co
 	//Filter
 	dictByt := buf[obj.contSt+2: obj.contEnd-2]
 	key:="/Filter"
+
+	filtStr, err := pdf.parseName(key, dictByt)
+	if err != nil {return fmt.Errorf("parseName error parsing value of %s: %v",key, err)}
+	fmt.Printf("%s: %s\n", key, filtStr)
+
+/*
 	idx := bytes.Index(dictByt, []byte(key))
 	if idx == -1 {return fmt.Errorf("no keyword \"%s\" found!", key)}
 
@@ -1368,8 +1374,13 @@ fmt.Printf("dicByt val: %s\n", string(dictByt[idx+len(key):]))
 	valstr := dictByt[posSt:posEnd]
 
 	fmt.Printf("%s: %s\n", key, valstr)
-
+*/
 	key = "/Length"
+	streamLen, err := pdf.parseInt(key, dictByt)
+	if err != nil {return fmt.Errorf("parseInt error parsing value of %s: %v",key, err)}
+	fmt.Printf("%s: %d\n", key, streamLen)
+
+/*
 	idx = bytes.Index(dictByt, []byte(key))
 	if idx == -1 {return fmt.Errorf("no keyword \"%s\" found!", key)}
 
@@ -1392,8 +1403,7 @@ fmt.Printf("dictByt val: %s\n", string(dictByt[idx+ len(key):]))
 	if posEnd == -1 {posEnd = len(dictByt)}
 
 	valstr = dictByt[posSt:posEnd]
-
-	fmt.Printf("%s: %s\n", key, valstr)
+*/
 
 
 	return nil
@@ -1827,16 +1837,13 @@ func (pdf *InfoPdf) parseMbox(obj pdfObj)(mBox *[4]float32, err error) {
 }
 
 
-func (pdf *InfoPdf) parseInt(keyword string, obj pdfObj)(num int, err error) {
+func (pdf *InfoPdf) parseInt(keyword string, objByt []byte)(num int, err error) {
 
 	var indObj pdfObj
 
 	buf := *pdf.buf
-	objByt := buf[obj.contSt:obj.contEnd]
-//fmt.Printf("Kids: %s\n",string(objByt))
 
-	keyByt := []byte("/" + keyword)
-
+	keyByt := []byte(keyword)
 	idx := bytes.Index(objByt, keyByt)
 	if idx == -1 {return -1, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
 
@@ -1852,8 +1859,10 @@ fmt.Printf("valstr: %s\n", string(valByt))
 	inObjId := parseIndObjRef(objByt[valst:])
 	// todo make sure inObjIs is valid
 
-	if inObjId > -1 {indObj = (*pdf.objList)[inObjId]}
-	valByt = buf[indObj.contSt: indObj.contEnd]
+	if inObjId > -1 {
+		indObj = (*pdf.objList)[inObjId]
+		valByt = buf[indObj.contSt: indObj.contEnd]
+	}
 
 fmt.Printf("parse num obj str: %s\n", string(valByt))
 
@@ -1886,21 +1895,34 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return num, nil
 }
 
-func (pdf *InfoPdf) parseFloat(keyword string, obj pdfObj)(fnum float32, err error) {
+func (pdf *InfoPdf) parseFloat(keyword string, objByt []byte)(fnum float32, err error) {
 
-	buf := *pdf.buf
-	objByt := buf[obj.contSt:obj.contEnd]
-//fmt.Printf("Kids: %s\n",string(objByt))
+	var indObj pdfObj
 
-	keyByt := []byte("/" + keyword)
+	buf:= *pdf.buf
+	keyByt := []byte(keyword)
 
 	idx := bytes.Index(objByt, keyByt)
 	if idx == -1 {return -1.0, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
 
 	opSt := -1
 	opEnd := -1
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+fmt.Printf("valstr: %s\n", string(valByt))
+
+	// whether indirect obj
+	inObjId := parseIndObjRef(objByt[valst:])
+	// todo make sure inObjIs is valid
+
+	if inObjId > -1 {
+		indObj = (*pdf.objList)[inObjId]
+		valByt = buf[indObj.contSt: indObj.contEnd]
+	}
+
+fmt.Printf("parse float obj str: %s\n", string(valByt))
+
 	endByt := []byte{'\n', '\r', '/', ' '}
 
 	istate := 0
@@ -1930,21 +1952,32 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return fnum, nil
 }
 
-func (pdf *InfoPdf) parseString(keyword string, obj pdfObj)(outstr string, err error) {
+func (pdf *InfoPdf) parseString(keyword string, objByt []byte)(outstr string, err error) {
 
+	var indObj pdfObj
 	buf := *pdf.buf
-	objByt := buf[obj.contSt:obj.contEnd]
-//fmt.Printf("Kids: %s\n",string(objByt))
 
-	keyByt := []byte("/" + keyword)
+	keyByt := []byte(keyword)
 
 	idx := bytes.Index(objByt, keyByt)
 	if idx == -1 {return "", fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
 
 	opSt := -1
 	opEnd := -1
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+fmt.Printf("valstr: %s\n", string(valByt))
+
+	// whether indirect obj
+	inObjId := parseIndObjRef(objByt[valst:])
+	// todo make sure inObjIs is valid
+
+	if inObjId > -1 {
+		indObj = (*pdf.objList)[inObjId]
+		valByt = buf[indObj.contSt: indObj.contEnd]
+	}
+
 	endByt := []byte{'\n', '\r', '/'}
 
 	istate := 0
@@ -1985,21 +2018,23 @@ fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf)
 	return outstr, nil
 }
 
-func (pdf *InfoPdf) parseName(keyword string, obj pdfObj)(outstr string, err error) {
+func (pdf *InfoPdf) parseName(keyword string, objByt []byte)(outstr string, err error) {
 
-	buf := *pdf.buf
-	objByt := buf[obj.contSt:obj.contEnd]
-//fmt.Printf("Kids: %s\n",string(objByt))
+//	var indObj pdfObj
+//	buf := *pdf.buf
 
-	keyByt := []byte("/" + keyword)
+	keyByt := []byte(keyword)
 
 	idx := bytes.Index(objByt, keyByt)
 	if idx == -1 {return "", fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
 
 	opSt := -1
 	opEnd := -1
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(objByt[idx+len(keyByt):obj.contEnd]))
+fmt.Printf("valstr: %s\n", string(valByt))
+
 	endByt := []byte{'\n', '\r', '/'}
 
 	istate := 0
