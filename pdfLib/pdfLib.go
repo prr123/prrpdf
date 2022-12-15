@@ -1421,6 +1421,16 @@ fmt.Printf("content obj: %d\n", contId)
 		fmt.Printf(outstr)
 		txtFil.WriteString(outstr)
 	}
+
+	// decode stream
+
+	stream, err := pdf.decodeStream(contId)
+	if err != nil {return fmt.Errorf("decodeStream: %v")}
+
+fmt.Println("stream: ", string(*stream))
+
+	txtFil.WriteString(string(*stream))
+
 	return nil
 }
 
