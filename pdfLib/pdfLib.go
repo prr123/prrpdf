@@ -61,6 +61,12 @@ type InfoPdf struct {
 	trailer int
 	objStart int
 	pageIds *[]int
+	fontIds *[]int
+	fCount int
+	gStateIds *[]int
+	gCount int
+	xObjIds *[]int
+	xObjCount int
 	pageList *[]pgObj
 	objList *[]pdfObj
 	rdObjList *[]pdfObj
@@ -927,7 +933,7 @@ func (pdf *InfoPdf) DecodePdfToText(txtfil string)(err error) {
 	_, err = (pdf.fil).Read(buf)
 	if err != nil {return fmt.Errorf("error Read: %v", err)}
 
-
+	pdf.initDecode()
 
 	//read first line
 	txtstr, nextPos, err := pdf.readLine(0)
@@ -1111,8 +1117,30 @@ fmt.Println()
 
 		fmt.Println()
 	}
-//xxx
+
+	// parse each Font object
+	for i:=0; i< pdf.fCount; i++ {
+		objId := (*pdf.fontIds)[i]
+		fmt.Printf("******* parsing Obj \"Font %d\" *******\n", objId)
+		err = pdf.parseFont(objId)
+		if err != nil {return fmt.Errorf("parseFont %d: %v",objId, err)}
+		outstr := fmt.Sprintf("parsed \"Font %s ObjId: %d\" successfully!", "name", objId)
+		txtFil.WriteString(outstr +"\n")
+		fmt.Printf("***** parsed %s ******\n", outstr)
+	}
+
 	return nil
+}
+
+func (pdf *InfoPdf) initDecode() {
+// method that initiates slices required in the decode process
+	fontIds := make([]int, 10)
+	pdf.fontIds = &fontIds
+
+	gStateIds := make([]int, 10)
+	pdf.gStateIds = &gStateIds
+
+	return
 }
 
 func (pdf *InfoPdf) readObjList()(rdobjList *[]pdfObj, err error) {
@@ -1383,6 +1411,23 @@ fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.co
 	streamLen, err := pdf.parseInt(key, dictByt)
 	if err != nil {return fmt.Errorf("parseInt error: parsing value of %s: %v",key, err)}
 	fmt.Printf("%s: %d\n", key, streamLen)
+
+	return nil
+}
+
+func (pdf *InfoPdf) parseFont(objId int)(err error) {
+
+	obj := (*pdf.objList)[objId]
+
+	buf := *pdf.buf
+fmt.Printf("font obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
+
+	txtFil := pdf.txtFil
+
+	outstr := fmt.Sprintf("********* Font: id %d *******\n", objId)
+
+	fmt.Printf(outstr)
+	txtFil.WriteString(outstr)
 
 	return nil
 }
@@ -2129,10 +2174,6 @@ func (pdf *InfoPdf) findKeyWord(key string, obj pdfObj)(ipos int) {
 func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 // method parses an object to determine dict start/end stream start/end and object type
 
-	fCount :=0
-	gCount :=0
-	xObjCount :=0
-
 	obj := (*pdf.objList)[objId]
 	if obj.start == 0 {
 		obj.typstr = "Invalid"
@@ -2230,11 +2271,14 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 //fmt.Printf("obj: %d valstr [%d:%d]: %s\n", objId, valst, valend, obj.typstr)
 	switch obj.typstr {
 	case "Font":
-		fCount++
+		(*pdf.fontIds)[pdf.fCount] = objId
+		pdf.fCount++
 	case "ExtGState":
-		gCount++
+		(*pdf.gStateIds)[pdf.gCount] = objId
+		pdf.gCount++
 	case "XObject":
-		xObjCount++
+		(*pdf.xObjIds)[pdf.xObjCount] = objId
+		pdf.xObjCount++
 	}
 	(*pdf.objList)[objId] = obj
 
@@ -2281,13 +2325,10 @@ func (pdf *InfoPdf) PrintPdf() {
 			fmt.Printf(" %.2f", (*pdf.mediabox)[i])
 		}
 	}
-	if pdf.fonts == nil {
-		fmt.Println("-- no Fonts")
-	} else {
-		fmt.Println("-- Font Ids:")
-		for i:=0; i< len(*pdf.fonts); i++ {
-				fmt.Printf("   %s %d\n", (*pdf.fonts)[i].Nam, (*pdf.fonts)[i].Id)
-		}
+	fmt.Printf("Font Count: %d\n", pdf.fCount)
+	fmt.Printf("Font Obj Ids:\n")
+	for i:=0; i< pdf.fCount; i++ {
+		fmt.Printf("%d\n", (*pdf.fontIds)[i])
 	}
 
 	if pdf.gStates == nil {
@@ -2356,6 +2397,22 @@ func (pdf *InfoPdf) PrintPdf() {
 	for ipg:=0; ipg< pdf.pageCount; ipg++ {
 		pdf.PrintPage(ipg)
 	}
+
+	for i:=0; i< pdf.fCount; i++ {
+		objId := (*pdf.fontIds)[i]
+		fmt.Printf("*************** Font Obj %d ******************\n", objId)
+
+	}
+/*
+	if pdf.fonts == nil {
+		fmt.Println("-- no Fonts")
+	} else {
+		fmt.Println("-- Font Ids:")
+		for i:=0; i< len(*pdf.fonts); i++ {
+				fmt.Printf("   %s %d\n", (*pdf.fonts)[i].Nam, (*pdf.fonts)[i].Id)
+		}
+	}
+*/
 	return
 }
 
