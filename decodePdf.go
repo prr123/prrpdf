@@ -47,8 +47,10 @@ fmt.Printf("out file: %s\n",outFilNamStr)
 	err = pdf.ReadPdf(parseFilnam)
 	if err != nil {fmt.Printf("error ReadPdf file: %s! %v\n", parseFilnam, err); os.Exit(-1);}
 
-	err = pdf.DecodePdf(outFilNamStr)
-	if err != nil {fmt.Printf("error CheckPdf: %v\n", err); os.Exit(-1);}
+	err = pdf.DecodePdfToText(outFilNamStr)
+	if err != nil {fmt.Printf("error DecodePdf: %v\n", err); os.Exit(-1);}
+
+	pdf.PrintPdf()
 
 	fmt.Println("success DecodePdf!")
 }
