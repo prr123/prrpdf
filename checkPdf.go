@@ -21,7 +21,8 @@ func main() {
 
 	if numArgs < 2 {
 		fmt.Printf("error - exit: insufficient command line arguments\n")
-		fmt.Printf("usage is: parsePdf \"file\"\n")
+		fmt.Printf("usage is: parsePdf \"file\" [\\out=] [\\dbg]\n")
+		os.Exit(-1)
 	}
 
 	parseFilnam :=os.Args[1]
