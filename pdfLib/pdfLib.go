@@ -1121,7 +1121,7 @@ fmt.Println()
 	// parse each Font object
 	for i:=0; i< pdf.fCount; i++ {
 		objId := (*pdf.fontIds)[i]
-		fmt.Printf("******* parsing Obj \"Font %d\" *******\n", objId)
+		fmt.Printf("*********** parsing Obj: %d Type: \"Font\" ************\n", objId)
 		err = pdf.parseFont(objId)
 		if err != nil {return fmt.Errorf("parseFont %d: %v",objId, err)}
 		outstr := fmt.Sprintf("parsed \"Font %s ObjId: %d\" successfully!", "name", objId)
@@ -1390,12 +1390,11 @@ fmt.Printf("content obj: %d\n", contId)
 	obj := (*pdf.objList)[contId]
 
 	buf := *pdf.buf
-fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
+//fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
 
 	txtFil := pdf.txtFil
 
 	outstr := fmt.Sprintf("***** Content Page %d: id %d *******\n", iPage+1, contId)
-
 	fmt.Printf(outstr)
 	txtFil.WriteString(outstr)
 
@@ -1405,13 +1404,23 @@ fmt.Printf("cont obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.co
 
 	filtStr, err := pdf.parseName(key, dictByt)
 	if err != nil {return fmt.Errorf("parseName error parsing value of %s: %v",key, err)}
-	fmt.Printf("%s: %s\n", key, filtStr)
+//fmt.Printf("key %s: val %s\n", key, filtStr)
+	if filtStr != "FlateDecode" {
+		outstr = fmt.Sprintf("Filter %s not implemented!\n", filtStr)
+		fmt.Printf(outstr)
+		txtFil.WriteString(outstr)
+	}
 
 	key = "/Length"
 	streamLen, err := pdf.parseInt(key, dictByt)
 	if err != nil {return fmt.Errorf("parseInt error: parsing value of %s: %v",key, err)}
-	fmt.Printf("%s: %d\n", key, streamLen)
-
+//fmt.Printf("key %s: %d\n", key, streamLen)
+	altStreamLen := obj.streamEnd - obj.streamSt
+	if streamLen != altStreamLen {
+		outstr = fmt.Sprintf("stream length inconsistent! Obj: %d Calc: %d\n", streamLen, altStreamLen)
+		fmt.Printf(outstr)
+		txtFil.WriteString(outstr)
+	}
 	return nil
 }
 
@@ -1748,7 +1757,7 @@ func (pdf *InfoPdf) parseKids(obj pdfObj)(err error) {
 
 	buf := *pdf.buf
 	objByt := buf[obj.contSt:obj.contEnd]
-//fmt.Printf("Kids: %s\n",string(objByt))
+fmt.Printf("Kids: %s\n",string(objByt))
 
 	idx := bytes.Index(objByt, []byte("/Kids"))
 	if idx == -1 {return fmt.Errorf("cannot find keyword \"/Kids\"")}
@@ -1876,7 +1885,7 @@ func (pdf *InfoPdf) parseInt(keyword string, objByt []byte)(num int, err error) 
 	valst := idx+len(keyByt)
 	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(valByt))
+//fmt.Printf("valstr: %s\n", string(valByt))
 
 	// whether indirect obj
 	inObjId := parseIndObjRef(objByt[valst:])
@@ -1887,7 +1896,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 		valByt = buf[indObj.contSt: indObj.contEnd]
 	}
 
-fmt.Printf("parse num obj valByt: %s\n", string(valByt))
+//fmt.Printf("parse num obj valByt: %s\n", string(valByt))
 
 	endByt := []byte{'\n', '\r', '/', ' '}
 
@@ -1910,7 +1919,7 @@ fmt.Printf("parse num obj valByt: %s\n", string(valByt))
 
 	valBuf := valByt[opSt:opEnd]
 
-fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+//fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
 	_, err = fmt.Sscanf(string(valBuf), "%d", &num)
 	if err != nil {return -1, fmt.Errorf("cannot parse num: %v", err)}
@@ -1933,7 +1942,7 @@ func (pdf *InfoPdf) parseFloat(keyword string, objByt []byte)(fnum float32, err 
 	valst := idx+len(keyByt)
 	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(valByt))
+//fmt.Printf("valstr: %s\n", string(valByt))
 
 	// whether indirect obj
 	inObjId := parseIndObjRef(objByt[valst:])
@@ -1944,12 +1953,12 @@ fmt.Printf("valstr: %s\n", string(valByt))
 		valByt = buf[indObj.contSt: indObj.contEnd]
 	}
 
-fmt.Printf("parse float obj str: %s\n", string(valByt))
+//fmt.Printf("parse float obj str: %s\n", string(valByt))
 
 	endByt := []byte{'\n', '\r', '/', ' '}
 
 	istate := 0
-	for i:= idx + len(keyByt); i< len(valByt); i++ {
+	for i:= 0; i< len(valByt); i++ {
 		switch istate {
 		case 0:
 			if util.IsNumeric(valByt[i]) {opSt = i;istate =1}
@@ -1968,7 +1977,7 @@ fmt.Printf("parse float obj str: %s\n", string(valByt))
 	valBuf := valByt[opSt:opEnd]
 
 
-fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+//fmt.Printf("key %s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
 	_, err = fmt.Sscanf(string(valBuf), "%f", &fnum)
 	if err != nil {return -1, fmt.Errorf("cannot parse fnum: %v", err)}
@@ -2005,7 +2014,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 	endByt := []byte{'\n', '\r', '/'}
 
 	istate := 0
-	for i:= idx + len(keyByt); i< len(valByt); i++ {
+	for i:= 0; i< len(valByt); i++ {
 		switch istate {
 		case 0:
 			if valByt[i] == '(' {opSt = i;istate =1}
@@ -2057,12 +2066,11 @@ func (pdf *InfoPdf) parseName(keyword string, objByt []byte)(outstr string, err 
 	valst := idx+len(keyByt)
 	valByt := objByt[valst:]
 
-fmt.Printf("valstr: %s\n", string(valByt))
+//fmt.Printf("valstr: %s\n", string(valByt))
 
 	endByt := []byte{'\n', '\r', '/'}
-
 	istate := 0
-	for i:= idx + len(keyByt); i< len(valByt); i++ {
+	for i:= 0; i< len(valByt); i++ {
 		switch istate {
 		case 0:
 			if valByt[i] == '/' {opSt = i;istate =1}
@@ -2089,7 +2097,7 @@ fmt.Printf("valstr: %s\n", string(valByt))
 
 	valBuf := valByt[opSt:opEnd]
 
-fmt.Printf("key /%s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
+//fmt.Printf("key %s val[%d: %d]: \"%s\"\n", keyword, opSt, opEnd, string(valBuf))
 
 	_, err = fmt.Sscanf(string(valBuf), "/%s", &outstr)
 	if err != nil {return "", fmt.Errorf("cannot parse string: %v", err)}
@@ -2198,6 +2206,7 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 	// no vals for contSt and contEnd
 	_, obj.contSt, err = pdf.readLine(obj.start)
 	if err != nil {return "", fmt.Errorf("no eol for obj %d: %v", objId, err)}
+//	if buf[obj.contSt] == '\r' {obj.contSt +=2} else {obj.contSt +=1}
 
 	// find endobj
 	objByt := buf[obj.contSt:obj.end]
@@ -2211,8 +2220,9 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 	objByt = buf[obj.contSt:endobj]
 	xres = bytes.Index(objByt, []byte("stream"))
 	if xres > -1 {
-		obj.streamSt = obj.contSt + xres
-		obj.contEnd = obj.streamSt
+		obj.contEnd = obj.contSt + xres
+		obj.streamSt = obj.contSt + xres + 7
+		if buf[obj.streamSt] == '\n' {obj.streamSt++}
 	}
 
 	objByt = buf[obj.contSt:obj.contEnd]
@@ -2300,10 +2310,10 @@ func (pdf *InfoPdf) decodeObjStr(objId int)(outstr string, err error) {
 		return outstr + "\n", fmt.Errorf(outstr)
 	}
 
-	obj.streamEnd = obj.streamSt + xres
+	obj.streamEnd = obj.streamSt + xres -1
+	if buf[obj.streamEnd -1] == '\r' {obj.streamEnd--}
 
 	(*pdf.objList)[objId] = obj
-
 	return outstr, nil
 }
 
