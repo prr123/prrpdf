@@ -2177,7 +2177,7 @@ fmt.Printf("%s found ind obj ref: %d\n", keyword, objId)
 			if nestlev > 10 {return nil, fmt.Errorf("nesting level exceeds 10!")}
 		}
 		if valByt[i] == '>' && valByt[i+1] == '>' {
-			if nestlev < 0 {return nil, fmt.Errorf("nestlev is less than zero!")}
+			if nestlev < 1 {return nil, fmt.Errorf("nestlev is less than zero!")}
 			nestlev--
 			nestEnd[nestlev] = i
 			break
