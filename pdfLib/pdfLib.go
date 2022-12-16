@@ -353,16 +353,16 @@ func (pdf *InfoPdf) parseTrailer()(err error) {
 
 //	fmt.Printf("trailer: %s\n", string(buf[trailStart:trailEnd]))
 
-	objId, err := pdf.parseObjRef("Root",trailStart, 1)
+	objId, err := pdf.parseTrailObjRef("Root",trailStart, 1)
 	if err != nil {return fmt.Errorf("parse Root Obj error: %v!", err)}
 	pdf.rootId = objId
 //fmt.Printf("Root: %d\n", objId)
 
-	objId, err = pdf.parseObjRef("Info",trailStart, 1)
+	objId, err = pdf.parseTrailObjRef("Info",trailStart, 1)
 	if err != nil {return fmt.Errorf("parse Info Obj error: %v!", err)}
 	pdf.infoId = objId
 
-	objId, err = pdf.parseObjRef("Size",trailStart, 2)
+	objId, err = pdf.parseTrailObjRef("Size",trailStart, 2)
 	if err != nil {return fmt.Errorf("parse Size Obj error: %v!", err)}
 	pdf.numObj = objId
 
@@ -370,7 +370,7 @@ func (pdf *InfoPdf) parseTrailer()(err error) {
 }
 
 
-func (pdf *InfoPdf) parseObjRef(key string, Start int, Type int)(objId int, err error) {
+func (pdf *InfoPdf) parseTrailObjRef(key string, Start int, Type int)(objId int, err error) {
 
 	//find key
 	buf := *pdf.buf
@@ -1286,17 +1286,20 @@ fmt.Printf("obj %d id %d type %s\n", cObjIdx, objList[cObjIdx].objId, objTyp)
 
 func (pdf *InfoPdf) parseRoot()(err error) {
 
+	buf := *pdf.buf
+
 	if pdf.rootId > pdf.numObj {return fmt.Errorf("invalid rootId!")}
 	if pdf.rootId ==0 {return fmt.Errorf("rootId is 0!")}
 
 	obj := (*pdf.objList)[pdf.rootId]
 
-	objId, err := pdf.parseObjRef("Pages",obj.contSt, 1)
+	objByt := buf[obj.contSt:obj.contEnd]
+	objId, err := pdf.parseObjRef("/Pages",objByt)
 	if err != nil {return fmt.Errorf("Root obj: parsing name \"/Pages\" error: %v!", err)}
 
 	pdf.pagesId = objId
 
-	outstr, err := pdf.parseKeyText("Title", obj)
+	outstr, err := pdf.parseName("Title", objByt)
 	if err != nil {}
 //return fmt.Errorf("Root obj: parsing name \"/Title\" error: %v!", err)}
 
@@ -1338,6 +1341,7 @@ func (pdf *InfoPdf) parsePage(iPage int)(err error) {
 
 	var pgobj pgObj
 //	buf := *pdf.buf
+	buf := *pdf.buf
 
 	pgobj.pageNum = iPage + 1
 
@@ -1354,7 +1358,8 @@ func (pdf *InfoPdf) parsePage(iPage int)(err error) {
 
 //fmt.Printf("testing page %d string:\n%s\n", iPage+1, string(buf[obj.start: obj.end]))
 
-	objId, err := pdf.parseObjRef("Contents",obj.contSt, 1)
+	objByt := buf[obj.contSt:obj.contEnd]
+	objId, err := pdf.parseObjRef("/Contents",objByt)
 	if err != nil {return fmt.Errorf("parse \"Contents\" error: %v!", err)}
 
 	outstr = fmt.Sprintf("Contents Obj: %d\n", objId)
@@ -1465,10 +1470,24 @@ fmt.Printf("font obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(objByt))
 	fmt.Printf(outstr)
 	txtFil.WriteString(outstr)
 
-	valStr, err := pdf.parseName("/Subtype", objByt)
-	if err != nil {return fmt.Errorf("no SubType")}
+	key := "/Subtype"
+	valStr, err := pdf.parseName(key, objByt)
+	if err != nil {return fmt.Errorf("%s: parseName: %v", key, err)}
 
-fmt.Printf("key: %s val: %s\n", "/Subtype", valStr)
+fmt.Printf("key: %s val: %s\n",key ,valStr)
+
+	key ="/BaseFont"
+	valStr, err = pdf.parseName(key, objByt)
+	if err != nil {return fmt.Errorf("%s: parseName %v",key, err)}
+
+fmt.Printf("key: %s val: %s\n", key, valStr)
+
+	key = "/FontDescriptor"
+	robjId, err := pdf.parseObjRef(key, objByt)
+	if err != nil {return fmt.Errorf("%s: parseObjRef: %v",key ,err)}
+
+fmt.Printf("key: %s val: %d\n", key, robjId)
+
 	return nil
 }
 
@@ -2193,6 +2212,36 @@ fmt.Printf("%s found ind obj ref: %d\n", keyword, objId)
 	dictByt := valByt[nestSt[0]:nestEnd[0]]
 	return &dictByt, nil
 }
+
+
+func (pdf *InfoPdf) parseObjRef(keyword string, objByt []byte) (objId int, err error) {
+// function parses ValByt to find object reference
+// if no obj id found return obj Id = -1
+
+	keyByt := []byte(keyword)
+
+	idx := bytes.Index(objByt, keyByt)
+	if idx == -1 {return -3, fmt.Errorf("cannot find keyword \"%s\"", string(keyByt))}
+
+	valst := idx+len(keyByt)
+	valByt := objByt[valst:]
+
+	valEnd := -1
+	for i:=0; i< len(valByt); i++ {
+		if valByt[i] == 'R' {
+			valEnd = i
+			break
+		}
+	}
+	if valEnd == -1 {return -1, fmt.Errorf("cannot find char \"R\"!")}
+
+	ref :=0
+	_, err = fmt.Sscanf(string(valByt[:valEnd+1]),"%d %d R", &objId, &ref)
+	if err != nil {return -2, fmt.Errorf("cannot parse Obj Ref: %v!",err)}
+
+	return objId, nil
+}
+
 
 func parseIndObjRef(valByt []byte) (objId int) {
 // function parses ValByt to find object reference
