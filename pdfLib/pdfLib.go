@@ -1455,15 +1455,20 @@ func (pdf *InfoPdf) parseFont(objId int)(err error) {
 	obj := (*pdf.objList)[objId]
 
 	buf := *pdf.buf
-fmt.Printf("font obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(buf[obj.contSt:obj.contEnd]))
+	objByt := buf[obj.contSt:obj.contEnd]
+
+fmt.Printf("font obj [%d:%d]:\n%s\n", obj.contSt, obj.contEnd, string(objByt))
 
 	txtFil := pdf.txtFil
 
 	outstr := fmt.Sprintf("********* Font: id %d *******\n", objId)
-
 	fmt.Printf(outstr)
 	txtFil.WriteString(outstr)
 
+	valStr, err := pdf.parseName("/Subtype", objByt)
+	if err != nil {return fmt.Errorf("no SubType")}
+
+fmt.Printf("key: %s val: %s\n", "/Subtype", valStr)
 	return nil
 }
 
