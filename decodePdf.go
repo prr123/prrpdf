@@ -9,9 +9,11 @@ package main
 import (
 	"os"
 	"fmt"
+	"log"
 	"strings"
-	"prrpdf/pdfLib"
-	util "prrpdf/utilLib"
+	"pdf/azulpdf/pdfLib"
+
+    util "github.com/prr123/utility/utilLib"
 )
 
 
@@ -30,7 +32,7 @@ func main() {
 	flags := [] string {"out", "dbg"}
 
 	argmap, err := util.ParseFlagsStart(os.Args, flags,2)
-	if err != nil {fmt.Printf("error ParseFlags: %v\n", err); os.Exit(-1);}
+	if err != nil {log.Printf("error ParseFlags: %v\n", err); os.Exit(-1);}
 
 	outFilNam, ok := argmap["out"]
 	if !ok {
@@ -42,15 +44,16 @@ func main() {
 	outFilNamStr := outFilNam.(string)
 fmt.Printf("out file: %s\n",outFilNamStr)
 
-	pdf := pdflib.Init()
+	pdf, err := pdflib.InitPdfLib(parseFilnam)
+	if err != nil {log.Fatalf("InitPdfLib: %v\n", err)}
 
-	err = pdf.ReadPdf(parseFilnam)
-	if err != nil {fmt.Printf("error ReadPdf file: %s! %v\n", parseFilnam, err); os.Exit(-1);}
+//	err = pdf.ReadPdf(parseFilnam)
+//	if err != nil {fmt.Printf("error ReadPdf file: %s! %v\n", parseFilnam, err); os.Exit(-1);}
 
 	err = pdf.DecodePdfToText(outFilNamStr)
-	if err != nil {fmt.Printf("error DecodePdf: %v\n", err); os.Exit(-1);}
+	if err != nil {log.Fatalf("DecodePdf: %v\n", err)}
 
 	pdf.PrintPdf()
 
-	fmt.Println("success DecodePdf!")
+	log.Println("success DecodePdf!")
 }
